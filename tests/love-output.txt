@@ -1,0 +1,7 @@
+[Audio] Cannot load sound 'missing' (missing.wav): tests/main.lua:342: missing test sound
+[Reroll] src/sys/preparation_generator.lua:8: biome_pool must use source 'biomes'
+[Deployment] src/ui/hex_grid.lua:10: Deployment board must define nine cells
+[Deployment] src/sys/deployment_generator.lua:13: Unknown location ID: unknown_test_location
+[Deployment] src/ui/deployment_transition.lua:40: Unknown or repeated transition cell: west
+[Mission action] src/states/mission_action.lua:21: Missing action transition settings
+[Agent Action] src/states/agent_action.lua:20: Invalid Agent Action rightMargin

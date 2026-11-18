@@ -1,0 +1,18 @@
+return {
+    routingDragThreshold = 5,
+    routingColor = { 1, 0.25, 0.2, 1 },
+    routingHoverColor = { 1, 0.85, 0.3, 1 },
+    directory = "assets/images/loc_cards", suffix = "_mini.png",
+    font = "assets/fonts/Undead Pixel 8.ttf", fontSize = 8,
+    panelWidth = 38, panelHeight = 54, portraitSize = 30,
+    padding = 4, portraitTop = 8, healthGap = 4,
+    gap = 4, labelGap = 8, leftMargin = 16,
+    background = { 0, 0, 0, 1 },
+    healthColor = { 75 / 255, 177 / 255, 1, 1 },
+    slashColor = { 90 / 255, 90 / 255, 90 / 255, 1 },
+    championColor = { 1, 190 / 255, 62 / 255, 1 },
+    crossColor = { 1, 93 / 255, 61 / 255, 1 },
+    missingColor = { 0.7, 0.7, 0.7, 1 },
+    eliminatedBrightness = 0.25, crossInset = 2, crossWidth = 2,
+    championTabWidth = 6, championTabHeight = 2,
+}

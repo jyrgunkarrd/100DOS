@@ -1,0 +1,23 @@
+return {
+    hoverSound = "assets/audio/sfx/hover.wav",
+    rollSound = "assets/audio/sfx/roll.wav",
+    deploySound = "assets/audio/sfx/button.wav",
+    agentDeploySound = "assets/audio/sfx/agent_deploy.wav",
+    hexDeploySound = "assets/audio/sfx/hex_deploy.wav",
+    agentMoveSound = "assets/audio/sfx/move.wav",
+    readySound = "assets/audio/sfx/ready.wav",
+    selectionSound = "assets/audio/sfx/button.wav",
+    agentActSound = "assets/audio/sfx/agent_act.wav",
+    cardViewSound = "assets/audio/sfx/card_view.wav",
+    endPhaseSound = "assets/audio/sfx/end_phase.wav",
+    gap = 16,
+    rosterGap = 16,
+    buttons = {
+        { id = "deploy", label = "Deploy", width = 89, height = 21, scale = 2,
+            basePath = "assets/images/ui_elements/deploy_btn.png",
+            hoverPath = "assets/images/ui_elements/deploy_btn_hover.png" },
+        { id = "reroll", label = "Reroll", width = 89, height = 21,
+            basePath = "assets/images/ui_elements/reroll_btn.png",
+            hoverPath = "assets/images/ui_elements/reroll_btn_hover.png" },
+    },
+}

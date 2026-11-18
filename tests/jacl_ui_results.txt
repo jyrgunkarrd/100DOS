@@ -1,0 +1,1 @@
+PASS: contextual menu, talent choices, free cancel, Bombard targeting/casualty/mill, scan, revealed-card hover and Security rendering

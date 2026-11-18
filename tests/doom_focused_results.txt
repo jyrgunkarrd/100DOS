@@ -1,0 +1,1 @@
+PASS: Doom track and talent-test integration

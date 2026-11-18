@@ -1,0 +1,1 @@
+PASS: battlefield rules, army generation, existing talent-test logic, stale-action guards and Lua compilation. Graphics checks pending.

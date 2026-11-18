@@ -1,0 +1,1 @@
+PASS: repeatable army templates, unique instances, atomic Clash cost, exclusions, stale plans and end-turn UI continuation
