@@ -20,4 +20,30 @@ function Assets:at(id, index)
     local board = self.byAgent[id]
     return board and board.occupied[self.slots[index]]
 end
+function Assets:remove(id, placement)
+    local board = self.byAgent[id]
+    for index, item in ipairs(board.placements) do
+        if item == placement then
+            table.remove(board.placements, index)
+            for i = item.start, item.start + item.size - 1 do board.occupied[self.slots[i]] = nil end
+            return
+        end
+    end
+end
+function Assets:applyHarm(id, events, piles, definitions)
+    for _, event in ipairs(events) do
+        for _, hit in ipairs(event.assetHits) do
+            local after = hit.asset
+            local placement = self:at(id, after.start)
+            local definition = definitions.byId[after.cardId]
+            hit.name = definition.name or after.cardId
+            placement.health, placement.defiance = after.health, after.defiance
+            if hit.destroyed then
+                self:remove(id, placement)
+                piles.discardPile = piles.discardPile or {}
+                table.insert(piles.discardPile, placement.card)
+            end
+        end
+    end
+end
 return Assets

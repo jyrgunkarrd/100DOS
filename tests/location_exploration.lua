@@ -133,7 +133,13 @@ return function(write)
     render("location_engagement_reveal.png")
     active:pointermoved(x, y)
     render("location_exploration_reveal.png")
-    active:update(2); click(); active:update(2); click(); active:update(2)
+    -- Keep this sequence focused on repeated exploration and engagement.
+    for _ = 1, 2 do
+        active:update(2)
+        putEnemyOnTop()
+        click()
+    end
+    active:update(2)
     assert(status.actionPoints == 0 and session.locationDecks:summary(cell).total == 17)
     click(); assert(session.locationDecks:summary(cell).total == 17)
     assert(active:allActionsSpent() and not active.done.hovered and machine.current == active)

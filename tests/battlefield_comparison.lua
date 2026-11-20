@@ -129,13 +129,20 @@ return function(write)
         assert(deploy:comparisonModel().hoveredCell == "north")
         render("battlefield_comparison_hover.png")
         local originalAgent = deploy.comparison.agents.byId[id]
+        local function checkPreviewScores(agent)
+            for _, entry in pairs(deploy:comparisonModel().byCell) do
+                for _, test in ipairs(entry.tests) do
+                    assert(test.score == require("src.sys.talent_values").sum(agent.talents, test.talent))
+                end
+            end
+        end
         deploy.comparison.agents.byId[id] = generalist
-        assert(deploy:comparisonModel().noPreference)
+        checkPreviewScores(generalist)
         deploy:pointermoved(940, 260)
         render("battlefield_comparison_generalist.png")
         specialist.talents[1].qty = 5
         deploy.comparison.agents.byId[id] = specialist
-        assert(deploy:comparisonModel().purposeStrongest)
+        checkPreviewScores(specialist)
         render("battlefield_comparison_purpose.png")
         deploy.comparison.agents.byId[id] = originalAgent
         for _, entry in pairs(model.byCell) do

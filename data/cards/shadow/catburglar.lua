@@ -21,6 +21,11 @@ return
         { type = "fire", qty = 1 },
 
     },
+    abilities = {
+        { id = "exhaust", zones = { play = true }, effect = "test_bonus", opposingTag = "lock", amount = 1 },
+        { id = "retask", zones = { play = true }, effect = "turn_talent", talent = "fire", amount = 2, actionPointCost = 0 },
+        { id = "expend", zones = { hand = true, play = true }, effect = "explore", actionPointCost = 0 },
+    },
     card_display = {
 
         p1 = { "[exhaust]EXHAUST[/exhaust] : +1 to any test opposed by the [tag]LOCK[/tag] tag."},

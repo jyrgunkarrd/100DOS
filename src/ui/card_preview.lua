@@ -26,7 +26,7 @@ function Preview.new(definitions, cards, settings, fonts, grid, height, normaliz
     for _, key in ipairs({ "artDirectory", "methodDirectory", "talentDirectory" }) do
         assert(type(settings[key]) == "string", "Invalid preview " .. key)
     end
-    local self = setmetatable({ settings = settings, fonts = fonts, displays = {}, images = {},
+    local self = setmetatable({ settings = settings, fonts = fonts, displays = {}, images = {}, artPaths = {},
         layouts = {}, diagnostics = {}, scroll = 0,
         x = math.floor(grid.bounds.x + grid.bounds.width / 2 - settings.width / 2),
         y = settings.top, maxHeight = height - settings.top - settings.bottomMargin }, Preview)
@@ -41,23 +41,24 @@ function Preview.new(definitions, cards, settings, fonts, grid, height, normaliz
         self.rulesFont:setFilter("nearest", "nearest")
         for _, instance in ipairs(cards) do
             local id = instance.cardId
-            if not self.displays[id] then
-                local d = (normalize or Display.normalize)(assert(definitions.byId[id], "Unknown preview card"))
-                self.displays[id] = d
-                self.artwork[id] = self.artworkAssets:prepare(ArtworkResolver.resolve(definitions.byId[id], biomeId))
-                local key = settings.artDirectory .. "/" .. id .. ".png"
-                local path = ArtworkResolver.cardPath(definitions.byId[id], id, settings.artDirectory)
-                self:load(path)
-                if key ~= path then self.images[key] = self.images[path]; self.images[path] = nil end
-                for _, method in ipairs(d.methods) do self:load(settings.methodDirectory .. "/" .. method .. ".png") end
-                for _, talent in ipairs(d.talents) do self:load(settings.talentDirectory .. "/" .. talent .. ".png") end
-                for _, test in ipairs(d.tests or {}) do self:load(settings.talentDirectory .. "/" .. test.type .. ".png") end
-                self.layouts[id] = self:layout(d)
-            end
+            self:prepareCard(id, definitions.byId[id], normalize, biomeId)
         end
     end)
     if not ok then self:release(); error(failure, 0) end
     return self
+end
+
+function Preview:prepareCard(id, definition, normalize, biomeId)
+    if self.displays[id] then return end
+    local c = self.settings
+    local d = (normalize or Display.normalize)(assert(definition, "Unknown preview card"))
+    local path = (c.artPath or ArtworkResolver.cardPath)(definition, id, c.artDirectory)
+    self.artwork[id] = self.artworkAssets:prepare(ArtworkResolver.resolve(definition, biomeId))
+    self:load(path)
+    for _, method in ipairs(d.methods) do self:load(c.methodDirectory .. "/" .. method .. ".png") end
+    for _, talent in ipairs(d.talents) do self:load(c.talentDirectory .. "/" .. talent .. ".png") end
+    for _, test in ipairs(d.tests or {}) do self:load(c.talentDirectory .. "/" .. test.type .. ".png") end
+    self.artPaths[id], self.layouts[id], self.displays[id] = path, self:layout(d), d
 end
 
 function Preview:load(path)
@@ -121,6 +122,11 @@ function Preview:layout(d)
         for i, test in ipairs(d.tests) do
             local label = test.label or c.talentLabels[test.type] or test.type:gsub("_", " "):upper()
             local value = tostring(test.value)
+            local valueColor
+            if test.modifier and test.modifier ~= 0 then
+                value = string.format("%+d  %s", test.modifier, value)
+                valueColor = test.modifier > 0 and c.talentBonusColor or c.talentPenaltyColor
+            end
             local valueWidth = valueFont:getWidth(value)
             local labelWidth = columnWidth - c.iconSize - c.gap * 2 - valueWidth
             assert(labelWidth > 0, "Talent test value does not fit preview")
@@ -128,7 +134,7 @@ function Preview:layout(d)
             local rowHeight = math.max(c.iconSize, textHeight(f.small, label, labelWidth), valueFont:getHeight())
             heights[rowIndex] = math.max(heights[rowIndex] or 0, rowHeight)
             l.testRows[i] = { x = math.floor((i - 1) / rows) * (columnWidth + columnGap),
-                width = columnWidth, label = label, value = value, labelWidth = labelWidth, valueWidth = valueWidth }
+                width = columnWidth, label = label, value = value, valueColor = valueColor, labelWidth = labelWidth, valueWidth = valueWidth }
         end
         local positions = {}
         for row = 1, rows do positions[row] = y; y = y + heights[row] + c.gap end
@@ -225,15 +231,18 @@ function Preview:layout(d)
     return l
 end
 
-function Preview:show(cardId, engagementText, runtimeHealth)
-    if self.cardId ~= cardId or self.engagementText ~= engagementText or self.runtimeHealth ~= runtimeHealth then
+function Preview:show(cardId, engagementText, runtimeHealth, runtimeDefiance)
+    if self.cardId ~= cardId or self.engagementText ~= engagementText or self.runtimeHealth ~= runtimeHealth or self.runtimeDefiance ~= runtimeDefiance then
         self.cardId, self.scroll, self.engagementText = cardId, 0, engagementText
-        self.runtimeHealth = runtimeHealth
+        self.runtimeHealth, self.runtimeDefiance = runtimeHealth, runtimeDefiance
         self.instanceDisplay, self.instanceLayout = nil, nil
         if cardId and (engagementText or runtimeHealth ~= nil) then
             local display = {}
             for key, value in pairs(self.displays[cardId]) do display[key] = value end
             display.engagementText = engagementText
+            if runtimeDefiance ~= nil then
+                display.health, display.defiance = runtimeHealth, runtimeDefiance
+            end
             if runtimeHealth ~= nil and display.stats then
                 local stats = {}
                 for i, stat in ipairs(display.stats) do
@@ -301,7 +310,7 @@ function Preview:draw()
     end
     artX = c.centerArtwork and x + math.floor((l.width - c.artSize) / 2) or x + l.width - c.artSize
     Artwork.draw(self.artwork[self.cardId], artX, y + l.artY, c.artSize, c.artSize, function()
-        self:drawImage(c.artDirectory .. "/" .. self.cardId .. ".png", artX, y + l.artY, c.artSize)
+        self:drawImage(self.artPaths[self.cardId], artX, y + l.artY, c.artSize)
     end)
     if l.assetSlots then AssetSlots.draw(self, d.assetSlots, l.assetSlots, x, y + l.artY) end
     if l.testsY then
@@ -311,7 +320,7 @@ function Preview:draw()
             local rowX, valueFont = x + row.x, f[c.testValueFont or "heading"]
             self:drawImage(c.talentDirectory .. "/" .. test.type .. ".png", rowX, y + row.y, c.iconSize)
             text(row.label, f.small, rowX + c.iconSize + c.gap, y + row.y + math.floor((row.height - textHeight(f.small, row.label, row.labelWidth)) / 2), row.labelWidth)
-            text(row.value, valueFont, rowX + row.width - row.valueWidth, y + row.y + math.floor((row.height - valueFont:getHeight()) / 2), row.valueWidth)
+            text(row.value, valueFont, rowX + row.width - row.valueWidth, y + row.y + math.floor((row.height - valueFont:getHeight()) / 2), row.valueWidth, row.valueColor)
         end
     end
     if l.tagsY then text(l.tags, f.small, x, y + l.tagsY, l.width, c.mutedColor) end

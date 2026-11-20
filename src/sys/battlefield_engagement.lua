@@ -1,6 +1,8 @@
 local Rules = require("data.battlefield_rules")
 local State = require("src.sys.battlefield_state")
 local Record = require("src.sys.battlefield_engagement_record")
+local Triggers = require("src.sys.force_triggers")
+local Passives = require("src.sys.force_passives")
 local Engagement = {}
 function Engagement.validate(rules)
     rules = rules or Rules.engagement
@@ -21,7 +23,7 @@ end
 local function copy(t)
     local result = {}; for k, v in pairs(t) do result[k] = v end; return result
 end
-function Engagement.prepare(armies, cellId, success, enemyDamageBonus)
+local function copyAtCell(armies, cellId)
     local source = armies.byCell[cellId]
     local staged = copy(armies)
     staged.byCell = { [cellId] = copy(source) }
@@ -29,20 +31,50 @@ function Engagement.prepare(armies, cellId, success, enemyDamageBonus)
         staged.byCell[cellId][side] = copy(source[side])
         staged.byCell[cellId][side].forces = copy(source[side].forces)
     end
-    local original, revision = armies, armies.revision
-    armies = staged
-    local pair = armies.byCell[cellId]
-    local before = Record.capture(pair, armies.catalogue)
+    return staged
+end
+function Engagement.project(armies, cellId)
+    local catalogue = armies.catalogue
+    local original = armies.byCell[cellId]
+    local source, removed, added = Triggers.beforeEngage(catalogue, original)
+    if not source then return end
+
+    local staged = copyAtCell(armies, cellId)
+    local pair = staged.byCell[cellId]
+    local addedId = removed.id .. ":before_engage:" .. added.id
+    pair.enemy.forces[#pair.enemy.forces + 1] = { id = addedId, forceId = added.id }
+    State.removeForce(staged, cellId, "allied", removed.id)
+    local forceBonus, forceSources = Passives.battlefieldBonus(staged, cellId, "engage")
+    local removedDefinition = catalogue.byId[removed.forceId]
+    local effect = {
+        sourceForceId = source.id, sourceName = source.name or source.id,
+        removedId = removed.id, removedForceId = removed.forceId, removedName = removedDefinition.name or removed.forceId,
+        addedId = addedId, addedForceId = added.id, addedName = added.name or added.id,
+        alliedBefore = original.allied.value, alliedAfter = pair.allied.value,
+        enemyBefore = original.enemy.value, enemyAfter = pair.enemy.value,
+        protectionBefore = State.protection(armies, cellId).total,
+        protectionAfter = State.protection(staged, cellId).total,
+        forceBonusBefore = Passives.battlefieldBonus(armies, cellId, "engage"),
+        forceBonusAfter = forceBonus,
+    }
+    return { armies = staged, effect = effect, forceSources = forceSources }
+end
+function Engagement.prepare(armies, cellId, success, enemyDamageBonus, projection)
+    local staged = copyAtCell(projection and projection.armies or armies, cellId)
+    local before = Record.capture(staged, cellId)
     local damage = Engagement.calculate(before, success, nil, enemyDamageBonus)
     -- Both amounts are fixed before either mutation; casualties cannot cancel retaliation.
     local exchanges = {}
     for _, side in ipairs({ "enemy", "allied" }) do
-        local removed, absorbed = {}, 0
-        if damage[side] > 0 then removed, absorbed = State.damage(armies, cellId, side, damage[side]) end
-        exchanges[side] = { damage = damage[side], removed = removed, absorbed = absorbed }
+        local removed, absorbed, replacements, bonusAbsorbed = {}, 0, {}, 0
+        if damage[side] > 0 then
+            removed, absorbed, replacements, bonusAbsorbed = State.damage(staged, cellId, side, damage[side])
+        end
+        exchanges[side] = { damage = damage[side], removed = removed, absorbed = absorbed,
+            replacements = replacements, bonusAbsorbed = bonusAbsorbed }
     end
-    return { source = source, owner = original, revision = revision, staged = staged, cell = cellId,
-        result = Record.complete(before, Record.capture(pair, armies.catalogue), exchanges) }
+    return { source = armies.byCell[cellId], owner = armies, revision = armies.revision, staged = staged, cell = cellId,
+        result = Record.complete(before, Record.capture(staged, cellId), exchanges, projection and projection.effect) }
 end
 function Engagement.canCommit(plan)
     return plan and not plan.committed and plan.owner.revision == plan.revision

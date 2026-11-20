@@ -4,19 +4,26 @@ Audio.__index = Audio
 -- Cache short sound effects once; replaying a cue restarts its existing source
 -- so rapid UI interaction cannot accumulate unbounded overlapping voices.
 function Audio.new(definitions, backend)
-    local self = setmetatable({ sources = {}, voices = {}, diagnostics = {}, volume = 1 }, Audio)
-    backend = backend or love.audio
+    local self = setmetatable({ sources = {}, voices = {}, diagnostics = {}, volume = 1,
+        backend = backend or love.audio, failed = {} }, Audio)
     for id, path in pairs(definitions) do
-        local ok, source = pcall(backend.newSource, path, "static")
-        if ok then
-            self.sources[id] = source
-        else
-            local message = "Cannot load sound '" .. id .. "' (" .. path .. "): " .. tostring(source)
-            self.diagnostics[#self.diagnostics + 1] = message
-            print("[Audio] " .. message)
-        end
+        self:load(id, path)
     end
     return self
+end
+
+function Audio:load(id, path)
+    if self.sources[id] or self.failed[id] then return end
+    local ok, source = pcall(self.backend.newSource, path, "static")
+    if ok then
+        if self.volume ~= 1 then source:setVolume(self.volume) end
+        self.sources[id] = source
+    else
+        self.failed[id] = true
+        local message = "Cannot load sound '" .. id .. "' (" .. path .. "): " .. tostring(source)
+        self.diagnostics[#self.diagnostics + 1] = message
+        print("[Audio] " .. message)
+    end
 end
 
 function Audio:setVolume(volume)

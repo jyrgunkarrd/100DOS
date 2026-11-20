@@ -1,4 +1,6 @@
 local Pair = require("src.ui.health_defiance")
+local Theme = require("data.preparation_theme")
+local paymentDuration, paymentRise, costGap = 0.3, 12, 4
 local View = {}
 View.__index = View
 function View.new(settings, fonts)
@@ -33,7 +35,7 @@ function View:layout(portrait, status)
         statsX = math.floor(portrait.x + (portrait.size - width) / 2),
         resourceX = portrait.x + portrait.size - resourceWidth, resourceWidth = resourceWidth }
 end
-function View:draw(portrait, status)
+function View:draw(portrait, status, fateCost)
     local g, c, f = love.graphics, self.settings, self.fonts
     local p = self:layout(portrait, status)
     g.push("all")
@@ -45,8 +47,10 @@ function View:draw(portrait, status)
         g.print(glyph, p.x + (i - 1) * c.actionSpacing,
             p.y + math.floor((c.height - self.actionFont:getHeight()) / 2))
     end
-    Pair.draw(f.heading, status.health, status.defiance, p.statsX,
-        p.y + math.floor((c.height - f.heading:getHeight()) / 2))
+    if not self:drawFateCost(portrait, status, fateCost) then
+        Pair.draw(f.heading, status.health, status.defiance, p.statsX,
+            p.y + math.floor((c.height - f.heading:getHeight()) / 2))
+    end
     local boxY = p.y + math.floor((c.height - c.resourceSize) / 2)
     g.setColor(c.frameColor); g.rectangle("fill", p.resourceX, boxY, p.resourceWidth, c.resourceSize)
     g.setColor(c.backgroundColor); g.rectangle("fill", p.resourceX + 1, boxY + 1, p.resourceWidth - 2, c.resourceSize - 2)
@@ -57,6 +61,44 @@ function View:draw(portrait, status)
         boxY + math.floor((c.resourceSize - f.small:getHeight()) / 2) + 1, p.resourceWidth, "center")
     g.pop()
 end
+
+function View:drawFateCost(portrait, status, cost, elapsed, reducedMotion)
+    if not cost or (cost.dmg == 0 and cost.trm == 0) then return end
+    if elapsed and elapsed >= paymentDuration then return end
+
+    local g, f, c = love.graphics, self.fonts, self.settings
+    local layout = self:layout(portrait, status)
+    local x = layout.statsX
+    local y = layout.y + math.floor((c.height - f.heading:getHeight()) / 2)
+    local healthWidth = f.heading:getWidth(tostring(status.health))
+    local defianceX = x + healthWidth + f.heading:getWidth(" / ")
+    local defianceWidth = f.heading:getWidth(tostring(status.defiance))
+    local progress = elapsed and elapsed / paymentDuration or 0
+    local rise = elapsed and not reducedMotion and math.floor(progress * paymentRise) or 0
+    local labelY = y + math.floor((f.heading:getHeight() - f.small:getHeight()) / 2) - rise
+    g.push("all")
+    g.setFont(f.small)
+    local function stat(amount, value, statX, statWidth, color, left)
+        if amount == 0 then return end
+        local unaffordable = not elapsed and value <= amount
+        local tint = unaffordable and Theme.penaltyColor or color
+        if elapsed or unaffordable then
+            g.setColor(tint[1], tint[2], tint[3], (1 - progress) * 0.42)
+            g.rectangle("fill", statX - 2, y - 1, statWidth + 4, f.heading:getHeight() + 2)
+        end
+        local label = "-" .. amount
+        local width = f.small:getWidth(label)
+        local labelX = left and statX - costGap - width or statX + statWidth + costGap
+        g.setColor(tint[1], tint[2], tint[3], 1 - progress)
+        g.print(label, labelX, labelY)
+    end
+    stat(cost.dmg, status.health, x, healthWidth, Theme.healthColor, true)
+    stat(cost.trm, status.defiance, defianceX, defianceWidth, Theme.defianceColor, false)
+    Pair.draw(f.heading, status.health, status.defiance, x, y)
+    g.pop()
+    return true
+end
+
 function View:release()
     if self.actionFont then self.actionFont:release(); self.actionFont = nil end
 end

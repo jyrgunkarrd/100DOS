@@ -1,4 +1,5 @@
 return function(write)
+    local actions = require("data.jacl_actions").actions
     local function clickAt(state, x, y, button)
         state:pointermoved(x, y)
         state:mousepressed(x, y, button)
@@ -50,6 +51,14 @@ return function(write)
         for _, b in ipairs(state.testPanel:buttons()) do if b.id == key then click(b.x + 5, b.y + 5); return end end
         error("Missing talent button")
     end
+    local function checkTalents(kind)
+        assert(state.testPanel.card)
+        local tests, talents = state.testPanel.tests, actions[kind].talents
+        assert(#tests == #talents)
+        for index, talent in ipairs(talents) do
+            assert(tests[index].talent == talent)
+        end
+    end
     local function openAction(kind)
         if not state.actions.open then click(state.actions.button.x + 4, state.actions.button.y + 4) end
         if not state.actions.battlefield then local tab = state.actions:tab(); click(tab.x + 4, tab.y + 4) end
@@ -60,7 +69,7 @@ return function(write)
     s.huntPresentation = nil
     s.agentStatus.byAgent[id].actionPoints = 20
     openAction("security")
-    assert(state.testPanel.tests[1].talent == "steel" and state.testPanel.tests[2].talent == "passion")
+    checkTalents("security")
     render("jacl_security_test.png")
     chooseTest(1); chooseTest("confirm")
     assert(state.actions.open, "Actions panel must stay open after Security")
@@ -79,7 +88,7 @@ return function(write)
     openAction("bombard")
     click(north.x, north.y)
     assert(state.actions.open and not state.actions.targeting, "Keep panel open but finish Bombard targeting")
-    assert(state.testPanel.card and state.testPanel.tests[1].talent == "fire" and state.testPanel.tests[2].talent == "purpose")
+    checkTalents("bombard")
     chooseTest(1); chooseTest("confirm")
     assert(s.agentStatus.byAgent[id].actionPoints == 16, tostring(state.testPanel.error))
     assert(state.testFeedback.result.battlefieldKind == "bombard" and state.testFeedback.millingStart)
@@ -100,7 +109,7 @@ return function(write)
     assert(huntCard)
     local jaclDeck, top = s.locationDecks.byCell.center, s.locationDecks.byCell.center.drawPile[#s.locationDecks.byCell.center.drawPile]
     openAction("triangulate")
-    assert(state.testPanel.tests[1].talent == "reason" and state.testPanel.tests[2].talent == "rhyme")
+    checkTalents("triangulate")
     chooseTest(1); chooseTest("confirm")
     assert(s.locationDecks:revealedTop(huntCell) == huntCard and jaclDeck.drawPile[#jaclDeck.drawPile] == top)
     state:update(state.testFeedback.scanStart + 0.2); render("jacl_triangulate_scan.png")

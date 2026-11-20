@@ -30,6 +30,7 @@ return function(write)
     clickAt(deploy, box.x + 4, box.y + 4)
     local poolPanel = assert(deploy.fatePoolInspection)
     assert(poolPanel.model.total == #builtPool.entries and poolPanel.model.total == 20)
+    assert(poolPanel.model.bonusTotal == 0 and not poolPanel.model.rows[1].bonus)
     local rowHeight = require("data.fate_pool_inspection_view").rowHeight
     for i, row in ipairs(poolPanel.model.rows) do
         if row.id == "brutality" then
@@ -134,12 +135,68 @@ return function(write)
     state:update(10); state:update(10) -- talent playback, then queued opportunity attacks
     for k,v in pairs(savedStatus) do session.agentStatus.byAgent[id][k]=v end
     Reserve.add(session.fatePool,require("data.fate_tiles.genius"),1)
+    Reserve.add(session.fatePool, require("data.fate_tiles.redline"), 2)
     state:keypressed("f")
     local reservePanel = assert(state.fatePoolInspection)
-    click(reservePanel.x+20,reservePanel.y+45)
-    assert(reservePanel.bonusTab and reservePanel.model.total==3)
+    local model = reservePanel.model
+    assert(model.total == #session.fatePool.entries and model.bonusTotal == 5)
+    assert(model.rows[1].bonus and model.rows[1].id == "genius" and model.rows[1].quantity == 3)
+    assert(model.rows[2].bonus and model.rows[2].id == "redline" and model.rows[2].quantity == 2)
+    assert(not model.rows[3].bonus)
+    click(reservePanel.list.x + 5, reservePanel.list.y + rowHeight + 5)
+    assert(model.rows[reservePanel.selected].id == "redline")
     render("bonus_reserve_inspection.png")
+    assert(reservePanel.assets.paths["assets/images/fate/redline.png"])
+    click(reservePanel.list.x + 5, reservePanel.list.y + rowHeight * 2 + 5)
+    assert(not model.rows[reservePanel.selected].bonus and #Reserve.entries(session.fatePool) == 5)
     state:keypressed("f")
+    local status = session.agentStatus.byAgent[id]
+    status.health, status.defiance = 6, 2
+    local function costLabels(amount, screenshot)
+        local print, labels = love.graphics.print, {}
+        love.graphics.print = function(value, x, y, ...)
+            if value == "-" .. amount and x >= state.portrait.x and x < state.portrait.x + state.portrait.size then
+                local _, green = love.graphics.getColor()
+                labels[#labels + 1] = { y = y, green = green }
+            end
+            return print(value, x, y, ...)
+        end
+        local ok, failure = pcall(render, screenshot)
+        love.graphics.print = print
+        assert(ok, failure)
+        return labels
+    end
+    state.testPanel:openLocation("ingenuity")
+    button(1); bonusTile(4)
+    assert(state.testPanel:bonusCost().dmg == 1 and state.testPanel:bonusCost().trm == 1)
+    bonusTile(5)
+    local evaluation, reason = state.testPanel:evaluate()
+    assert(not evaluation and reason == "NOT ENOUGH DEFIANCE FOR BONUS TILES")
+    button("confirm")
+    assert(state.testPanel.card and #Reserve.entries(session.fatePool) == 5)
+    local invalid = costLabels(2, "redline_bonus_cost.png")
+    assert(#invalid == 2 and invalid[2].green < invalid[1].green)
+    assert(state.testPanel.images["assets/images/fate/redline.png"])
+    bonusTile(5); assert(state.testPanel:bonusCost().dmg == 1)
+    button("cancel")
+    assert(not state.testPanel:bonusCost() and status.health == 6 and status.defiance == 2)
+    local exhausted = enemy.exhausted
+    enemy.exhausted, status.defiance = true, 6
+    state.testPanel:openLocation("ingenuity")
+    button(1); bonusTile(4); bonusTile(5); button("confirm")
+    assert(not state.testPanel.card and status.health == 4 and status.defiance == 4)
+    local paid = assert(state.testFeedback.result).reserveCost
+    assert(paid.dmg == 2 and paid.trm == 2)
+    local start = costLabels(2, "redline_payment_start.png")
+    assert(#start == 2)
+    state:update(0.15)
+    local moving = costLabels(2, "redline_payment_rise.png")
+    assert(#moving == 2 and moving[1].y < start[1].y and moving[2].y < start[2].y)
+    state:update(0.16)
+    assert(#costLabels(2, "redline_payment_end.png") == 0)
+    state:update(10)
+    enemy.exhausted = exhausted
+    for key, value in pairs(savedStatus) do status[key] = value end
     local originalPile = deck.drawPile
     deck.drawPile = {{instanceId="faceup1",cardId="forgiven",health=2,faceUp=true},
         {instanceId="faceup2",cardId="security_door",faceUp=true}}

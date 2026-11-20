@@ -99,6 +99,48 @@ return function(write)
     assert(Turn.finish(s, "a") and status.defeated and status.health == 0)
     assert(#s.attackFeedback.events == 1 and Engagement.count(s, "a") == 0)
 
+    -- A newly played multi-slot card can take both harm types from the first attacker.
+    -- The next attacker sees that exact copy already destroyed.
+    do
+        local game, agent = fixture()
+        local definition = game.agentCards.definitions.byId.asset
+        definition.health, definition.defiance, definition.asset_slots = 1, 2, 3
+        local rolls = { count = 0, random = function(self, n)
+            assert(n == 2)
+            self.count = self.count + 1
+            return n
+        end }
+        local input = { instanceId = 1, start = 1, harmRandom = rolls }
+        local pending = assert(Resolution.prepare(game, "a", "play_card", input))
+        local duplicate = assert(Resolution.prepare(game, "a", "play_card", input))
+        local card = game.agentCards.byAgent.a.hand[1]
+        assert(rolls.count == 0 and Resolution.commit(pending))
+        assert(rolls.count == 3 and not Resolution.commit(duplicate) and rolls.count == 3)
+        local first, second = unpack(game.attackFeedback.events)
+        assert(first.health == 10 and first.defiance == 10 and first.assetHits[1].destroyed)
+        assert(first.beforeAssets[1].health == 1 and #first.afterAssets == 0 and #second.assetHits == 0)
+        assert(agent.health == 8 and agent.defiance == 9)
+        assert(game.agentCards.byAgent.a.discardPile[1] == card and #game.agentCards.byAgent.a.hand == 1)
+        for i = 1, 3 do assert(not game.agentAssets:at("a", i)) end
+    end
+    do
+        local board = {
+            { instanceId = 1, cardId = "plate", health = 2, defiance = 0, exhausted = true },
+            { instanceId = 2, cardId = "plate", health = 2, defiance = 0 },
+            { instanceId = 3, cardId = "ward", health = 0, defiance = 3 },
+            { instanceId = 4, cardId = "tool", health = 0, defiance = 0 },
+        }
+        local sides = {}
+        local last = { random = function(_, n) sides[#sides + 1] = n; return n end }
+        local agent, remaining, hits = require("src.sys.agent_harm").resolve(
+            { health = 2, defiance = 1 }, board, 3, 2, last)
+        assert(table.concat(sides, ",") == "3,3,2,2,2")
+        assert(agent.health == 2 and agent.defiance == 1 and #remaining == 3)
+        assert(remaining[1].exhausted and remaining[1].health == 1 and remaining[2].defiance == 1)
+        assert(hits[2].asset.instanceId == 2 and hits[2].destroyed)
+        assert(board[1].health == 2 and board[2].health == 2)
+    end
+
     -- Real UI: committed damage is independent of timers, focus, and input.
     local machine = require("src.states.state_machine").new()
     for _, name in ipairs({ "mission_preparation", "mission_deployment", "mission_action", "agent_action" }) do
@@ -106,7 +148,7 @@ return function(write)
     end
     machine:change("mission_preparation"); assert(machine.current:deploy())
     local deployment = machine.current; deployment:update(2)
-    local cell = next(deployment.assignments)
+    local cell = "north"
     for _, id in ipairs(deployment.package.agentIds) do deployment.agentDeployment:assign(id, cell) end
     deployment.agentView:refresh(); assert(deployment:beginAction()); machine.current:update(1)
     local mission = machine.current; local session = mission.session
@@ -115,14 +157,14 @@ return function(write)
     local active = machine.current; active:update(1)
     local state = session.agentStatus.byAgent[id]
     state.health, state.defiance = 6, 6 -- Deterministic combat fixture regardless of the selected Agent.
-    for n = 1, 3 do
+    for n = 1, 4 do
         local pile = session.locationDecks.byCell[cell].drawPile
         for i, card in ipairs(pile) do
             if session.locationCardPool.byId[card.cardId].card_type == "ENEMY" then
                 pile[i], pile[#pile] = pile[#pile], card; break
             end
         end
-        session.locationDecks:draw(cell).engagedAgentId = id
+        if n <= 3 then session.locationDecks:draw(cell).engagedAgentId = id end
     end
     local function render(name)
         local canvas = love.graphics.newCanvas(1280, 720)
@@ -172,11 +214,27 @@ return function(write)
     local attackers = Engagement.count(session, id)
     local handEntry = active.hand.entries[1]
     local handCount = #active.hand.cards
-    local expectedResources = state.resources - session.agentCards.definitions.byId[handEntry.card.cardId].cost
+    local cardId = handEntry.card.cardId
+    local definitions = session.agentCards.definitions.byId
+    local originalCard = definitions[cardId]
+    local equipped = {}
+    for key, value in pairs(originalCard) do equipped[key] = value end
+    equipped.health, equipped.defiance = 1, 1
+    definitions[cardId] = equipped
+    local expectedResources = state.resources - equipped.cost
+    local perform = active.performAction
+    function active:performAction(kind, args)
+        args.harmRandom = { random = function(_, n) return n end }
+        return perform(self, kind, args)
+    end
     active:mousepressed(handEntry.x + 3, handEntry.y + 3, 1)
     active:pointermoved(active.equipment.x + 20, active.equipment.y + 20)
     active:mousereleased(active.equipment.x + 20, active.equipment.y + 20, 1)
-    assert(active.feedback:busy() and #active.hand.cards == handCount - 1 and state.health == 8 - attackers)
+    active.performAction, definitions[cardId] = perform, originalCard
+    assert(active.feedback:busy() and #active.hand.cards == handCount - 1 and state.health == 8 - attackers + 1)
+    assert(active.feedback.record.events[1].assetHits[1].destroyed)
+    active:update(0.3)
+    render("attack_asset_destroyed.png")
     assert(state.resources == expectedResources and state.actionPoints == 1)
     active:mousereleased(active.equipment.x + 20, active.equipment.y + 20, 1)
     assert(#active.hand.cards == handCount - 1)

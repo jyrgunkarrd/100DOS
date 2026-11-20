@@ -29,6 +29,12 @@ function Definition.validate(tile, id)
         label .. "unknown special outcome")
     assert(tile.bonus == nil or type(tile.bonus) == "boolean", label .. "bonus must be a boolean")
     assert(not tile.bonus or (not tile.special and not tile.clash), label .. "bonus tiles support numeric modifiers only")
+    if tile.extra_cost ~= nil then
+        assert(tile.bonus and type(tile.extra_cost) == "table", label .. "extra_cost requires a bonus tile and a table")
+        for key, value in pairs(tile.extra_cost) do
+            assert((key == "dmg" or key == "trm") and whole(value), label .. "invalid extra_cost component")
+        end
+    end
     local clash = tile.clash
     if clash == nil then return end
     assert(type(clash) == "table", label .. "clash must be a table")

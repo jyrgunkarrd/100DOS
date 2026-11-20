@@ -127,6 +127,40 @@ function Hunt.enter(session, cell, card)
     end
 end
 
+local function attemptSecure(session, cell, random)
+    local hunt, decks = session.missionHunt, session.locationDecks
+    local deck = decks.byCell[cell]
+    local hidden, championIndex = {}, nil
+    for i, card in ipairs(deck.drawPile) do
+        if card.instanceId == hunt.championInstanceId then
+            championIndex = i
+        elseif decks.pool.byId[card.cardId].card_type == "COMPANY" and card.health > 0 then
+            hidden[#hidden + 1] = i
+        end
+    end
+    local index
+    if #hidden > 0 then
+        index = hidden[#hidden == 1 and 1 or pick(random, #hidden)]
+    else
+        for _, card in pairs(deck.inPlay) do
+            if decks.pool.byId[card.cardId].card_type == "COMPANY" and card.health > 0 then return end
+        end
+        hunt.secured[cell] = true
+        index = championIndex
+    end
+    if index then
+        local card = table.remove(deck.drawPile, index)
+        card.faceUp, card.engagedAgentId = nil, nil
+        if deck.revealedTopId == card.instanceId then deck.revealedTopId = nil end
+        local entry = { card = card, inPlay = deck.inPlay }
+        require("src.sys.location_card_entry").prepare(session, cell, entry, session.activeAgentId)
+        deck.inPlay[card.instanceId] = entry.card
+        deck.inPlayOrder[#deck.inPlayOrder + 1] = card.instanceId
+        deck.revision = deck.revision + 1
+        Hunt.enter(session, cell, entry.card)
+    end
+end
+
 -- Defeat effects run only after a real elimination, never after discard or withdrawal.
 function Hunt.eliminated(session, cell, card, random)
     local hunt = session.missionHunt
@@ -135,23 +169,7 @@ function Hunt.eliminated(session, cell, card, random)
     hunt.located[card.instanceId] = nil
     if role == "CHAMPION" then Outcome.victory(session, card)
     elseif role == "COMPANY" or role == "BODYGUARD" then
-        hunt.secured[cell] = true
-        -- Securing either hunt enemy's location must never strand a hidden boss.
-        local champion, championCell, zone = Hunt.find(session, hunt.championInstanceId)
-        if championCell == cell and zone == "drawPile" then
-            local deck = session.locationDecks.byCell[cell]
-            for i, entry in ipairs(deck.drawPile) do
-                if entry.instanceId == champion.instanceId then table.remove(deck.drawPile, i); break end
-            end
-            deck.inPlay[champion.instanceId] = champion
-            deck.inPlayOrder[#deck.inPlayOrder + 1] = champion.instanceId
-            champion.engagedAgentId = nil
-            local agentId = session.activeAgentId
-            if agentId and session.agentDeployment.placements[agentId] == cell and not champion.exhausted then
-                champion.engagedAgentId = agentId
-            end
-            deck.revision = deck.revision + 1; Hunt.enter(session, cell, champion)
-        end
+        attemptSecure(session, cell, random)
     end
     if role == "BODYGUARD" then
         local candidates = { hunt.championInstanceId }

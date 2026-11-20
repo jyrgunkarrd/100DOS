@@ -7,7 +7,8 @@ function View.new(agents)
     return setmetatable({ agents = agents, assets = Assets.new(), settings = require("data.battlefield_comparison_view") }, View)
 end
 function View:build(session, agentId, eligible, pointerX, pointerY)
-    local model = Model.build(session.assignments, session.locations, assert(self.agents.byId[agentId]), eligible, session.armies.jaclCellId)
+    local model = Model.build(session.assignments, session.locations, assert(self.agents.byId[agentId]),
+        eligible, session.armies.jaclCellId)
     local cell = pointerX and pointerY and session.grid:hit(pointerX, pointerY)
     model.hoveredCell = cell and cell.id or nil
     return model

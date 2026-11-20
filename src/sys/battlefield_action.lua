@@ -1,10 +1,14 @@
 local Rules = require("data.battlefield_rules")
 local Tests = require("src.sys.battlefield_tests")
+local Passives = require("src.sys.force_passives")
 local State = require("src.sys.battlefield_state")
 local Topology = require("src.sys.board_topology")
 local Fate = require("src.sys.fate_draw")
 local Reveal = require("src.sys.fate_reveal")
 local Clashes = require("src.sys.battlefield_clashes")
+local Triggers = require("src.sys.force_triggers")
+local Reserve = require("src.sys.fate_reserve")
+local Engagement = require("src.sys.battlefield_engagement")
 local Action = {}
 function Action.available(session, agentId, kind, clash)
     if require("data.jacl_actions").actions[kind] then return require("src.sys.jacl_actions").available(session, agentId, kind, clash) end
@@ -39,12 +43,16 @@ function Action.available(session, agentId, kind, clash)
     end
     return { valid = true, cell = cell, pair = pair, location = location, status = status }
 end
+function Action.previewEngagement(session, agentId, clash)
+    local available = Action.available(session, agentId, "engage", clash)
+    if available.valid then return Engagement.project(session.armies, available.cell) end
+end
 function Action.evaluate(session, agentId, args)
     if require("data.jacl_actions").actions[args.battlefieldKind] then return require("src.sys.jacl_actions").evaluate(session, agentId, args) end
     local value = Action.available(session, agentId, args.battlefieldKind, args.clash)
     if not value.valid then return nil, value.reason end
     local kind = args.battlefieldKind
-    if kind == "engage" then require("src.sys.battlefield_engagement").validate() end
+    if kind == "engage" then Engagement.validate() end
     for _, test in ipairs(Tests.resolve(value.location, kind, args.clash and args.clash.difficulty)) do
         if test.id == args.testId then value.test = test end
     end
@@ -52,6 +60,14 @@ function Action.evaluate(session, agentId, args)
     local commitments, reason = require("src.sys.talent_commitments").evaluate(session, agentId, value.test.talent, args.committedIds, args.bonusCounts)
     if not commitments then return nil, reason end
     for key, entry in pairs(commitments) do value[key] = entry end
+    if kind == "engage" then value.engagementProjection = Engagement.project(session.armies, value.cell) end
+    local projection = value.engagementProjection
+    if projection then
+        value.forceBonus, value.forceSources = projection.effect.forceBonusAfter, projection.forceSources
+    else
+        value.forceBonus, value.forceSources = Passives.battlefieldBonus(session.armies, value.cell, kind)
+    end
+    value.bonus = value.bonus + value.forceBonus
     Fate.validate(session.fatePool)
     return value
 end
@@ -77,14 +93,25 @@ function Action.prepare(session, agentId, args)
         return true
     end
     local kind = args.battlefieldKind
-    local engagement, choices, decks
+    local choices, decks
     if kind == "engage" then
-        engagement, choices, decks = require("src.sys.battlefield_engagement"), {}, session.locationDecks
+        choices, decks = {}, session.locationDecks
         local rate = Rules.cardsMilledPerEnemyEliminated
         assert(type(rate) == "number" and rate >= 0 and rate < math.huge and rate % 1 == 0, "Invalid milling rate")
         -- Prepare both outcomes before Fate or any publication. No partial army/deck commits.
+        local tiles
         for _, success in ipairs({ true, false }) do
-            local army = engagement.prepare(armies, value.cell, success, args.clash and args.clash.damage)
+            local army = Engagement.prepare(armies, value.cell, success, args.clash and args.clash.damage,
+                value.engagementProjection)
+            local exchange = army.result
+            local awards = Triggers.afterEngage(armies.catalogue, exchange.armiesBefore, exchange.armiesAfter)
+            for _, award in ipairs(awards) do
+                tiles = tiles or require("data.fate_tiles.index").refresh().byId
+                local tile = assert(tiles[award.tileId], "Unknown engagement bonus tile: " .. award.tileId)
+                assert(tile.bonus, "Engagement reward must be a bonus tile: " .. award.tileId)
+                award.tile = tile
+                exchange.summary = exchange.summary .. " / +" .. award.count .. " " .. (tile.name or tile.id)
+            end
             local kills = #army.result.sides.enemy.removed
             local mill = decks:prepareMill(value.cell, kills * rate)
             for i, card in ipairs(mill.entered) do
@@ -94,12 +121,12 @@ function Action.prepare(session, agentId, args)
             end
             local receipt = require("src.sys.milling_receipt").new(decks, value.cell, mill, "forces", kills)
             army.result.milling = receipt
-            choices[success] = { army = army, mill = mill, receipt = receipt }
+            choices[success] = { army = army, mill = mill, receipt = receipt, awards = awards }
         end
     end
     local result = { battlefield = true, agentId = agentId, name = value.location.name,
         test = value.test, cell = value.cell, battlefieldKind = kind, locationId = session.assignments[value.cell],
-        clash = args.clash and true }
+        forceBonus = value.forceBonus, forceSources = value.forceSources, clash = args.clash and true }
     return { result = result, provokingKind = not args.clash and "battlefield_" .. kind,
         status = { actionPoints = value.status.actionPoints - (args.clash and 0 or Rules.actionPointCost) },
         publish = function()
@@ -112,7 +139,7 @@ function Action.prepare(session, agentId, args)
             if choices then
                 if session.locationDecks ~= decks then return false end
                 for _, choice in pairs(choices) do
-                    if not engagement.canCommit(choice.army) or not decks:canCommitMill(value.cell, choice.mill) then return false end
+                    if not Engagement.canCommit(choice.army) or not decks:canCommitMill(value.cell, choice.mill) then return false end
                 end
             end
             local effect = Reveal.prepare(session, result, value.base, value.bonus, value.test.value, args.random)
@@ -123,15 +150,21 @@ function Action.prepare(session, agentId, args)
                 for _, card in ipairs(choice.mill.entered) do
                     require("src.sys.location_card_entry").committed(session, value.cell, card)
                 end
-                local exchange = assert(engagement.commit(choice.army))
+                local exchange = assert(Engagement.commit(choice.army))
+                for _, award in ipairs(choice.awards) do
+                    Reserve.add(pool, award.tile, award.count, award.source)
+                end
                 decks.byCell[value.cell].lastMilling = choice.receipt
                 for key, entry in pairs(exchange) do result[key] = entry end
                 if args.clash then Clashes.consume(value.pair, args.clash) end
             elseif kind == "entrench" then
                 if result.success then State.entrench(armies, value.cell) end
-                result.summary = result.success and ("ALLIED PROTECTION SET TO " .. armies.byCell[value.cell].protection) or "PROTECTION UNCHANGED"
+                result.summary = result.success and ("ALLIED PROTECTION SET TO " .. State.protection(armies, value.cell).total) or "PROTECTION UNCHANGED"
             else
-                if result.success then require("src.sys.battlefield_maneuver").begin(session, agentId, value.cell) end
+                if result.success then
+                    require("src.sys.battlefield_maneuver").begin(session, agentId, value.cell,
+                        result.total - result.difficulty, args.random)
+                end
                 result.summary = result.success and "CHOOSE ONE FORCE TO MANEUVER" or "NO FORCES MOVED"
             end
             value.handState.hand, value.handState.discardPile = hand, discard

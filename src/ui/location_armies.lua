@@ -1,5 +1,6 @@
 local Value = require("src.sys.army_value")
 local Clashes = require("src.sys.battlefield_clashes")
+local State = require("src.sys.battlefield_state")
 local View = {}
 View.__index = View
 
@@ -63,7 +64,7 @@ local function secondaryLabel(self, label, text, center)
 end
 
 function View:protectionLabel(label)
-    local protection = self.armies.byCell[label.cellId].protection or 0
+    local protection = State.protection(self.armies, label.cellId).total
     if protection <= 0 then return nil end
     return secondaryLabel(self, label, self.settings.protectionPrefix .. protection,
         label.x + label.alliedOffset + self.font:getWidth(label.allied) / 2)
@@ -92,8 +93,11 @@ function View:draw(overrides)
         local override = overrides and overrides[label.cellId]
         if label.revision ~= pair.revision or label.override ~= override then
             label.override = override
-            label.enemy = (pair.routedBy and settings.routedLabel or settings.enemyPrefix .. Value.calculate(pair.enemy, self.armies.catalogue, self.armies.rules))
-            label.allied = settings.alliedPrefix .. (override or Value.calculate(pair.allied, self.armies.catalogue, self.armies.rules))
+            local alliedOverride, enemyOverride = override, nil
+            if type(override) == "table" then alliedOverride, enemyOverride = override.allied, override.enemy end
+            label.enemy = (pair.routedBy and settings.routedLabel
+                or settings.enemyPrefix .. (enemyOverride or Value.calculate(pair.enemy, self.armies.catalogue, self.armies.rules)))
+            label.allied = settings.alliedPrefix .. (alliedOverride or Value.calculate(pair.allied, self.armies.catalogue, self.armies.rules))
             label.alliedOffset = self.font:getWidth(label.enemy) + settings.sideGap
             label.width = label.alliedOffset + self.font:getWidth(label.allied)
             label.x = math.floor(label.centerX - label.width / 2)

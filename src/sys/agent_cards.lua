@@ -11,6 +11,13 @@ local function copy(list)
     return result
 end
 
+function Cards.shuffle(pile, random)
+    for i = #pile, 2, -1 do
+        local j = random:random(i)
+        pile[i], pile[j] = pile[j], pile[i]
+    end
+end
+
 function Cards.new(agentIds, agents, definitions, settings, random)
     local Rules = require("src.sys.agent_card_rules")
     Rules.resolve(settings)
@@ -46,10 +53,7 @@ function Cards.new(agentIds, agents, definitions, settings, random)
     random = random or love.math.newRandomGenerator()
     for _, id in ipairs(agentIds) do
         local pile = self.byAgent[id].drawPile
-        for i = #pile, 2, -1 do
-            local j = random:random(i)
-            pile[i], pile[j] = pile[j], pile[i]
-        end
+        Cards.shuffle(pile, random)
     end
     return self
 end

@@ -1,11 +1,12 @@
 local Values = require("src.sys.talent_values")
+local Cost = require("src.sys.fate_bonus_cost")
 local Commitments = {}
 function Commitments.evaluate(session, agentId, talent, ids, bonusCounts)
     ids = ids or {}
     if type(ids) ~= "table" then return nil, "INVALID COMMITMENTS" end
     local cards, selected, bonus, count = session.agentCards, {}, 0, 0
     local handState = cards.byAgent[agentId]
-    local base = Values.sum(assert(cards.agents.byId[agentId], "Missing Agent talents").talents or {}, talent)
+    local base = Values.effective(cards.agents.byId[agentId], talent, session.agentStatus.byAgent[agentId])
     for key in pairs(ids) do
         count = count + 1
         if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > #ids then return nil, "INVALID COMMITMENTS" end
@@ -22,6 +23,8 @@ function Commitments.evaluate(session, agentId, talent, ids, bonusCounts)
     end
     local reserve, reason = require("src.sys.fate_reserve").evaluate(session.fatePool, bonusCounts)
     if not reserve then return nil, reason end
+    local payment, costReason = Cost.stage(session.agentStatus.byAgent[agentId], reserve.cost)
+    if not payment then return nil, costReason end
     local cardBonus = bonus
     bonus = bonus + reserve.value
     assert(base + bonus < math.huge, "Talent total overflow")

@@ -83,6 +83,9 @@ function Turn.commitRefresh(session, staged)
         local state = session.agentStatus.byAgent[id]
         state.resources, state.actionPoints, state.exhausted = nextState.resources, state.actionPointCapacity, false
     end
+    for _, board in pairs(session.agentAssets and session.agentAssets.byAgent or {}) do
+        for _, asset in ipairs(board.placements) do asset.exhausted = false end
+    end
     require("src.sys.location_card_state").readyAll(session)
     return true
 end

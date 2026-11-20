@@ -1,4 +1,6 @@
 local Model = require("src.sys.battlefield_maneuver")
+local ForcePreview = require("src.ui.force_preview")
+local Caption = require("data.battlefield_view").inspection
 local Panel = {}
 Panel.__index = Panel
 local function inside(x, y, b) return x and y and x >= b.x and x < b.x + b.width and y >= b.y and y < b.y + b.height end
@@ -28,7 +30,10 @@ function Panel:start()
     if #self.session.armies.byCell[pending.cell].allied.forces == 0 then self.mode = "reserve" end
     self:layout(); return true
 end
-function Panel:close() self.open, self.pressed, self.flight, self.hovered = false, nil, nil, nil end
+function Panel:close()
+    self.open, self.pressed, self.flight = false, nil, nil
+    self:pointer(nil, nil)
+end
 function Panel:cancelSelection()
     if not self.flight then self.unitId, self.pressed = nil, nil end
 end
@@ -45,6 +50,7 @@ function Panel:layout()
     self.scrollMax = math.max(0, offset - c.gap - (c.width - 2 * c.padding))
     self.scroll = math.max(0, math.min(self.scroll, self.scrollMax))
     for _, slot in ipairs(self.slots) do slot.x, slot.y = c.x + c.padding + slot.offset - self.scroll, c.y + c.portraitsTop end
+    self:pointer(self.pointerX, self.pointerY)
 end
 function Panel:selectedSlot()
     for _, slot in ipairs(self.slots) do if slot.unit.id == self.unitId then return slot end end
@@ -57,22 +63,36 @@ function Panel:buttons()
         { id = "next", text = ">", x = c.x + c.width - 34, y = c.y + c.height - 24, width = 22, height = 18 },
     }
 end
+function Panel:viewport()
+    local c = self.settings
+    return { x = c.x + c.padding, y = c.y + c.portraitsTop - 2,
+        width = c.width - 2 * c.padding, height = c.height - c.portraitsTop - 25 }
+end
+function Panel:slotAt(x, y)
+    if not inside(x, y, self:viewport()) then return end
+    for _, slot in ipairs(self.slots) do if inside(x, y, slot) then return slot end end
+end
 function Panel:hit(x, y)
     if self.flight then return end
     local c = self.settings
     for _, b in ipairs(self:buttons()) do if inside(x, y, b) then return b.id end end
     if inside(x, y, c) then
-        if x >= c.x + c.padding and x < c.x + c.width - c.padding then
-            for _, slot in ipairs(self.slots) do if inside(x, y, slot) then return "unit:" .. slot.unit.id end end
-        end
-        return
+        local slot = self:slotAt(x, y)
+        return slot and "unit:" .. slot.unit.id, slot
     end
     if x and y then
         local cell = self.session.grid:hit(x, y)
         if cell and self.session.assignments[cell.id] then return "cell:" .. cell.id end
     end
 end
-function Panel:pointer(x, y) self.pointerX, self.pointerY, self.hovered = x, y, self.open and self:hit(x, y) or nil end
+function Panel:pointer(x, y)
+    self.pointerX, self.pointerY = x, y
+    local hit, slot
+    if self.open then hit, slot = self:hit(x, y) end
+    self.hovered = hit
+    if slot and not self.forcePreview then self.forcePreview = ForcePreview.new(self.session, self.settings.y) end
+    if self.forcePreview then self.forcePreview:show(slot and slot.unit.forceId, slot) end
+end
 function Panel:press(x, y) self.pressed = self:hit(x, y) end
 function Panel:transfer(destination)
     local slot = self:selectedSlot()
@@ -85,8 +105,16 @@ function Panel:transfer(destination)
     local ok, result = Model.commit(self.session, self.pending, self:source(), destination, self.unitId)
     if not ok then self.error = result; return end
     self.flight = require("src.ui.force_transfer_feedback").new(result, slot, target, self.portraits, self.settings, self.reducedMotion, values)
-    if self.session.audio then self.session.audio:playOverlapping("agentMove") end
-    self.pressed, self.hovered = nil, nil
+    local cue = self.session.armies.catalogue.byId[result.forceId].move_audio
+    local audio = self.session.audio
+    if audio and type(cue) == "string" and cue ~= "" and not cue:find("[/\\:]") then
+        local filename = cue:match("%.[%w]+$") and cue or cue .. ".wav"
+        local soundId = "forceMove:" .. filename
+        audio:load(soundId, "assets/audio/sfx/" .. filename)
+        audio:playOverlapping(soundId)
+    end
+    self.pressed = nil
+    self:pointer(nil, nil)
 end
 function Panel:releasePointer(x, y)
     local id, pressed = self:hit(x, y), self.pressed
@@ -110,15 +138,20 @@ end
 function Panel:scrollBy(delta)
     if self.flight then return end
     self.scroll = self.scroll - delta * self.settings.scrollStep; self.pressed = nil; self:layout()
-    self.hovered = self:hit(self.pointerX, self.pointerY)
 end
 function Panel:wheel(delta)
+    if self.forcePreview and self.forcePreview:wheel(delta) then return end
     if inside(self.pointerX, self.pointerY, self.settings) then self:scrollBy(delta) end
 end
 function Panel:update(dt)
     if not self.open then return end
     self.age = self.age + math.max(0, dt)
-    if self.flight then if self.flight:update(dt) then self:close() end
+    if self.flight then
+        if self.flight:update(dt) then
+            local impact = self.flight.record.hit
+            self:close()
+            return impact
+        end
     elseif not Model.valid(self.session, self.pending) then
         Model.decline(self.session, self.pending); self:close()
     end
@@ -143,12 +176,14 @@ function Panel:draw(font)
         elseif hover == s.armies.jaclCellId then hint = "Click JACL to view reinforcements."
         elseif hover == self.pending.cell then hint = "Click to view local Forces." end
     end
-    g.print(self.flight and c.labels.moving or self.error or hint, c.x + c.padding, c.y + 36)
+    g.print(self.flight and self.flight:label() or self.error or hint, c.x + c.padding, c.y + 36)
     g.setColor(c.muted); g.print(c.labels.clear .. "  " .. c.labels.spent, c.x + c.padding, c.y + 49)
     g.push("all")
-    local x1, y1 = g.transformPoint(c.x + c.padding, c.y + c.portraitsTop - 2)
-    local x2, y2 = g.transformPoint(c.x + c.width - c.padding, c.y + c.height - 27)
+    local viewport = self:viewport()
+    local x1, y1 = g.transformPoint(viewport.x, viewport.y)
+    local x2, y2 = g.transformPoint(viewport.x + viewport.width, viewport.y + viewport.height)
     g.intersectScissor(x1, y1, x2 - x1, y2 - y1)
+    local eliteWidth = font:getWidth(Caption.eliteLabel)
     for _, slot in ipairs(self.slots) do
         if not self.flight or slot.unit.id ~= self.flight.record.unitId then
             self.portraits:draw(slot.unit.forceId, slot.x, slot.y)
@@ -156,10 +191,13 @@ function Panel:draw(font)
             g.setColor(selected and c.accent or c.muted); g.setLineWidth(selected and 3 or 1)
             g.rectangle("line", slot.x, slot.y, slot.width, slot.artHeight)
             local definition = s.armies.catalogue.byId[slot.unit.forceId]
-            g.setColor(c.text); g.printf(definition.name, slot.x, slot.y + slot.artHeight + 5, slot.width, "center")
-            if definition.strength == "elite" then
-                g.setColor(c.background); g.rectangle("fill", slot.x + 1, slot.y + 1, 42, 14)
-                g.setColor(c.reserve); g.print("ELITE", slot.x + 4, slot.y + 3)
+            local elite = definition.strength == "elite"
+            local captionY = slot.y + slot.artHeight + 4
+            local nameWidth = slot.width - (elite and eliteWidth + Caption.eliteGap or 0)
+            g.setColor(c.text); g.printf(definition.name, slot.x, captionY, nameWidth, "left")
+            if elite then
+                g.setColor(Caption.eliteColor)
+                g.print(Caption.eliteLabel, slot.x + slot.width - eliteWidth, captionY)
             end
         end
     end
@@ -173,11 +211,17 @@ function Panel:draw(font)
     if not self.flight then
         for _, b in ipairs(self:buttons()) do
             g.setColor(c.accent); g.rectangle("line", b.x, b.y, b.width, b.height)
-            g.setColor(c.text); g.printf(b.text, b.x, b.y + 5, b.width, "center")
+            local textY = b.y + math.floor((b.height - font:getHeight()) / 2)
+            g.setColor(c.text); g.printf(b.text, b.x, textY, b.width, "center")
         end
     end
     g.pop()
+    if self.forcePreview then self.forcePreview:draw() end
     if self.flight then self.flight:draw() end
 end
-function Panel:release() self:close(); self.portraits:release() end
+function Panel:release()
+    self:close()
+    self.portraits:release()
+    if self.forcePreview then self.forcePreview:release(); self.forcePreview = nil end
+end
 return Panel

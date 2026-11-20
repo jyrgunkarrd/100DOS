@@ -1,1 +1,12 @@
-PASS: Target track native portraits, roster order, health, elimination, escape, footer layout and ownership; Doom clock, phase milling and JACL exhaustion; Layered artwork resolution, cache ownership and pixel rendering; Agent inspection previews, opportunity attacks and defeat, enemy engagement, location hover previews, location exploration, mixed-type counts, shared decks, packages, previews, audio, scaled pointer input, reroll commit/recovery/restart, click cancellation, deployment board and scene handoff, agent dragging and clusters, state lifecycle
+tests/jacl_actions.lua:120: CARD HAS NO MATCHING TALENT
+stack traceback:
+	[C]: in function 'assert'
+	tests/jacl_actions.lua:120: in function <tests/jacl_actions.lua:1>
+	tests/main.lua:30: in function <tests/main.lua:18>
+	[C]: in function 'xpcall'
+	tests/main.lua:18: in function 'load'
+	[love "callbacks.lua"]:136: in function <[love "callbacks.lua"]:135>
+	[C]: in function 'xpcall'
+	[love "boot.lua"]:368: in function <[love "boot.lua"]:355>
+	[C]: in function 'xpcall'
+	[love "boot.lua"]:377: in function <[love "boot.lua"]:344>

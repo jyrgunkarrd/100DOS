@@ -14,4 +14,9 @@ function Values.sum(entries, talent)
     assert(count == #entries and total < math.huge, "Invalid talent array or total")
     return total
 end
+function Values.effective(agent, talent, status)
+    local bonuses = status and status.turnTalentBonuses
+    local modifier = bonuses and bonuses[talent] or 0
+    return Values.sum(agent.talents or {}, talent) + modifier, modifier
+end
 return Values

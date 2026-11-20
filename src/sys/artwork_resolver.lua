@@ -24,4 +24,10 @@ function Resolver.cardPath(definition, id, directory, suffix)
     if directory == "assets/images/loc_cards" and definition and definition.card_type == "SILENCER" then directory = "assets/images/silencers" end
     return directory .. "/" .. id .. (suffix or ".png")
 end
+
+function Resolver.forcePath(definition, id, directory)
+    local stem = definition.portrait or id
+    assert(type(stem) == "string" and stem:match("^[%w_-]+$"), "Invalid force portrait")
+    return directory .. "/" .. stem .. ".png"
+end
 return Resolver

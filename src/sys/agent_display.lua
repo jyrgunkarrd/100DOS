@@ -1,14 +1,16 @@
 local Common = require("src.sys.card_display")
 local Status = require("src.sys.agent_status")
+local Values = require("src.sys.talent_values")
 local Display = {}
 function Display.normalize(definition, settings, session, id)
     local d = Common.normalize(definition)
     d.type, d.cost, d.slots, d.talents, d.tests = "AGENT", 0, 0, {}, {}
-    local ratings = {}
-    for _, talent in ipairs(definition.talents or {}) do ratings[talent.type] = (ratings[talent.type] or 0) + talent.qty end
-    for _, key in ipairs(settings.talentOrder) do d.tests[#d.tests + 1] = { type = key, value = ratings[key] or 0 } end
-    local defaults = require("data.agent_status_defaults")
     local status = session and session.agentStatus and session.agentStatus.byAgent[id]
+    for _, key in ipairs(settings.talentOrder) do
+        local value, modifier = Values.effective(definition, key, status)
+        d.tests[#d.tests + 1] = { type = key, value = value, modifier = modifier }
+    end
+    local defaults = require("data.agent_status_defaults")
     local l = settings.labels
     if status then
         local state = Status.isDefeatedState(status) and l.defeated

@@ -1,7 +1,8 @@
 return {
     x = 200, y = 408, width = 880, height = 300, padding = 16, gap = 18,
     portraitsTop = 65, captionHeight = 32, scrollStep = 96,
-    flightDuration = 0.4, arrivalHold = 0.16, arcHeight = 38, arrivalSize = 40,
+    flightDuration = 0.32, arrivalHold = 0.16,
+    arrivalPulse = { spread = 18, lineWidth = 2 },
     previewSize = 12, previewRingSize = 44,
     previewPulse = { period = 0.9, duration = 0.9, lineWidth = 2, alpha = 0.8 },
     reserveBadge = { size = 22, bottomInset = 5, padding = 4, lineWidth = 1, textOffsetY = 1 },
@@ -15,5 +16,5 @@ return {
         reinforce = "Click a Force to reinforce ", decline = "DECLINE MANEUVER",
         spent = "AP and committed cards have already been spent.",
         empty = "No Forces here. Click the JACL for reinforcements.",
-        moving = "FORCE RELOCATING", clear = "Escape / right-click clears selection." },
+        moving = "FORCE RELOCATING", hit = "%s HIT · %s", clear = "Escape / right-click clears selection." },
 }

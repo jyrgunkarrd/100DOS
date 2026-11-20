@@ -17,6 +17,7 @@ function R.evaluate(pool, counts)
     if counts == nil then counts = {} end
     if type(counts) ~= "table" then return nil, "INVALID BONUS COMMITMENTS" end
     local available, selected, total = {}, {}, 0
+    local cost = { dmg = 0, trm = 0 }
     for _, entry in ipairs(R.entries(pool)) do available[entry.tileId] = (available[entry.tileId] or 0) + 1 end
     for id, count in pairs(counts) do
         if type(count) ~= "number" or count < 0 or count % 1 ~= 0 or count > (available[id] or 0) then
@@ -26,11 +27,16 @@ function R.evaluate(pool, counts)
             local tile = pool.definitions[id]
             if not tile or not tile.bonus then return nil, "INVALID BONUS TILE" end
             total = total + count * Definition.modifier(tile)
+            local extra = tile.extra_cost
+            if extra then
+                cost.dmg = cost.dmg + count * (extra.dmg or 0)
+                cost.trm = cost.trm + count * (extra.trm or 0)
+            end
             selected[id] = count
         end
     end
     assert(math.abs(total) < math.huge, "Bonus total overflow")
-    return { counts = selected, value = total }
+    return { counts = selected, value = total, cost = cost }
 end
 function R.consume(pool, selection)
     local remaining, counts = {}, {}
@@ -48,7 +54,8 @@ function R.rows(pool)
         if not row then
             local tile = pool.definitions[entry.tileId]
             row = { id = entry.tileId, name = tile.name or entry.tileId, quantity = 0,
-                modifier = Definition.modifier(tile), fate = Definition.display(tile), bonus = true }
+                modifier = Definition.modifier(tile), fate = Definition.display(tile), bonus = true,
+                extraCost = tile.extra_cost }
             rows[#rows + 1], byId[entry.tileId] = row, row
         end
         row.quantity = row.quantity + 1

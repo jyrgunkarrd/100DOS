@@ -13,7 +13,7 @@ return
     },
     tags = {
 
-        "robot",
+        "wardroid",
         "digital",
         "airborne",
 

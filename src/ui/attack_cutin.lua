@@ -1,3 +1,4 @@
+local Difficulty = require("src.ui.test_difficulty")
 local CardVfx = require("src.ui.card_outcome_vfx")
 local Artwork = require("src.ui.layered_artwork")
 -- Presentation only. Images are borrowed from the existing preview/portrait caches.
@@ -115,10 +116,12 @@ function Cutin:draw(feedback, width, height, font)
     end
     local event = p.event
     local preview, portrait = self.preview, self.portrait
-    local enemy = preview and event.cardId and preview.images[preview.settings.artDirectory .. "/" .. event.cardId .. ".png"]
+    local enemy = preview and event.cardId and preview.images[preview.artPaths[event.cardId]]
     if event.battlefield then enemy = feedback.locationImage end
     local agent = portrait and portrait.images[self.agentId]
-    local ax = c.width - c.panelWidth + p.agentOffset + (feedback.talent and 0 or p.shake)
+    local absorbed = not feedback.talent and event.assetHits and #event.assetHits > 0
+        and event.beforeHealth == event.health and event.beforeDefiance == event.defiance
+    local ax = c.width - c.panelWidth + p.agentOffset + ((feedback.talent or absorbed) and 0 or p.shake)
     local ex = p.enemyOffset + (feedback.talent and p.shake or 0)
     local locationColor = outcome and outcome.sweep and c.agentColor or c.enemyColor
     local enemyTreatment = feedback.talent and defeat or outcome and { brightness = outcome.brightness, contentAlpha = outcome.contentAlpha, frameAlpha = outcome.frameAlpha, artMix = outcome.artMix, replacement = feedback.outcomeImage }
@@ -164,7 +167,7 @@ function Cutin:draw(feedback, width, height, font)
     if outcome and outcome.sweep then verticalSweep(ex, c.agentColor, p.enemyAlpha, outcome) end
     if defeat then verticalSweep(feedback.talent and ex or ax, c.enemyColor, feedback.talent and p.enemyAlpha or p.alpha, defeat) end
     label(c.versus, c.panelWidth, c.height / 2 - 12, c.width - 2 * c.panelWidth, 2, t.textColor)
-    if p.impact > 0 then
+    if p.impact > 0 and not absorbed then
         g.setColor(1, 1, 1, p.impact * 0.22)
         g.rectangle("fill", feedback.talent and ex or ax, 2, c.panelWidth, c.artSize + 14)
         g.setColor(1, 0.8, 0.65, p.impact)
@@ -177,11 +180,10 @@ function Cutin:draw(feedback, width, height, font)
         end
     end
     if feedback.talent then
-        label(event.test.label .. " " .. event.difficulty, 0, c.artSize + 46, c.width, 1, t.textColor)
+        g.setColor(1, 1, 1, p.alpha)
+        g.printf(Difficulty.line(event.test.label .. " ", event.test, event.difficulty, t.textColor), 0, c.artSize + 46, c.width, "center")
         if p.hit then
-            local result = event.special and (event.special == "auto_success" and "AUTO SUCCESS" or "AUTO FAILURE")
-                or event.base .. " + " .. event.committed .. " " .. (event.modifier >= 0 and "+" or "-")
-                    .. " " .. math.abs(event.modifier) .. " = " .. event.total .. " vs " .. event.difficulty
+            local result = Difficulty.result(event)
             label(result, 0, c.artSize + 68, c.width, 1, t.textColor)
             local text = event.success and "SUCCESS" or "FAILURE"
             if event.success and event.test.kind == "strike" then text = event.defeated and "SUCCESS - ENEMY ELIMINATED" or "SUCCESS - ENEMY HEALTH " .. event.beforeHealth .. " > " .. event.health
@@ -206,6 +208,21 @@ function Cutin:draw(feedback, width, height, font)
         end
         stat(t.health, event.beforeHealth, event.health, ax, t.healthColor)
         stat(t.defiance, event.beforeDefiance, event.defiance, ax + c.panelWidth / 2, t.defianceColor)
+        local hits = event.assetHits or {}
+        local rowHeight = math.min(34, (c.height / 2 - 26) / math.max(1, #hits))
+        for i, hit in ipairs(hits) do
+            local y = c.height / 2 + 20 + (i - 1) * rowHeight
+            if p.impact > 0 then
+                g.setColor(1, 0.8, 0.65, 0.25 * p.impact)
+                g.rectangle("fill", c.panelWidth + 2, y - 2, c.width - c.panelWidth * 2 - 4, rowHeight)
+            end
+            local name = hit.name .. (hit.destroyed and "  DESTROYED" or "")
+            local loss = {}
+            if hit.damage > 0 then loss[#loss + 1] = "-" .. hit.damage .. " HEALTH" end
+            if hit.trauma > 0 then loss[#loss + 1] = "-" .. hit.trauma .. " DEFIANCE" end
+            label(name, c.panelWidth + 3, y, c.width - 2 * c.panelWidth - 6, 1, hit.destroyed and c.enemyColor or t.textColor)
+            label(table.concat(loss, "  "), c.panelWidth + 3, y + rowHeight / 2, c.width - 2 * c.panelWidth - 6, 1, t.textColor)
+        end
         if event.defeated then label(t.defeated, ax, event.health == 0 and c.height + 14 or c.artSize / 2, c.panelWidth, 2, c.enemyColor) end
     end
     g.pop()

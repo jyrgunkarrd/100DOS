@@ -13,10 +13,11 @@ faction = "allied",
     },
     tags = {
 
-        "robot",
+        "wardroid",
         "digital",
         "boom war",
 
     },
+    move_audio = "mech", 
 
 }

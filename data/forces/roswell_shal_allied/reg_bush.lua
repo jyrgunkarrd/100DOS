@@ -19,5 +19,6 @@ return
 
     },
     card_bg = "guerrilla_bg",
+    move_audio = "foot", 
 
 }

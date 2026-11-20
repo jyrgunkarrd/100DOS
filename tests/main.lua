@@ -18,6 +18,7 @@ function love.load()
     local ok, failure = xpcall(function()
         require("tests.army_routing")(write)
         if routingOnly then return end
+        require("tests.asset_abilities")()
         require("tests.card_column_layout")()
         require("tests.location_actions")(write)
         require("tests.clash_reinforcements")(write)

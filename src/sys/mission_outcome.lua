@@ -1,5 +1,7 @@
 local Outcome = {}
 local function clearPending(session)
+    local status = session.agentStatus and session.agentStatus.byAgent[session.activeAgentId]
+    if status then status.turnTalentBonuses = nil end
     session.reinforcementFeedback = nil
     session.pendingHuntEscape, session.huntPresentation = nil, nil
     session.pendingEndTurn, session.pendingManeuver, session.phaseTransition = nil, nil, nil

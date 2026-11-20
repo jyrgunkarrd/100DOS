@@ -1,15 +1,22 @@
+local Difficulty = require("src.ui.test_difficulty")
 local Tests = require("src.sys.talent_tests")
 local Values = require("src.sys.talent_values")
+local Passives = require("src.sys.force_passives")
+local BattlefieldRules = require("data.battlefield_rules")
+local BattlefieldAction = require("src.sys.battlefield_action")
 local Action = require("src.sys.talent_test_action")
+local Reserve = require("src.sys.fate_reserve")
+local Tile = require("src.ui.fate_tile")
+local EngagementPreview = require("src.ui.engagement_effect_preview")
 local Panel = {}
 Panel.__index = Panel
 local function inside(x, y, b)
     return x and y and x >= b.x and y >= b.y and x < b.x + b.width and y < b.y + b.height
 end
-function Panel.new(session, agentId, width, preview, portrait)
+function Panel.new(session, agentId, width, preview, portrait, equipment)
     local c = require("data.talent_test_view")
     return setmetatable({ session = session, agentId = agentId, settings = c,
-        preview = preview, portrait = portrait, images = {}, x = (width - c.width) / 2, y = c.top, width = c.width, height = c.height, selected = {}, first = 1 }, Panel)
+        preview = preview, portrait = portrait, equipment = equipment, images = {}, x = (width - c.width) / 2, y = c.top, width = c.width, height = c.height, engagementEffectHeight = 0, selected = {}, first = 1 }, Panel)
 end
 -- Cache mini-portrait artwork independently of the full-art preview images.
 function Panel:loadImage(path)
@@ -24,9 +31,12 @@ function Panel:loadImage(path)
 end
 function Panel:open(card)
     self.battlefieldArgs, self.locationArgs = nil, nil
+    self:layoutEngagementEffect()
     self.bonusSelected, self.reserveFirst = {}, 1
     self.card, self.selected, self.test, self.error, self.first = card, {}, nil, nil, 1
     self.definition = self.session.locationDecks.pool.byId[card.cardId]
+    self.exhaustOptions = require("src.sys.asset_abilities").exhaustOptions(self.session, self.agentId, self.definition)
+    self.exhaustSelected = {}
     self.tests = Tests.resolve(self.definition)
     local locationArt = require("data.location_exploration_view")
     local agentArt = require("data.deployment_roster_defaults")
@@ -38,7 +48,10 @@ function Panel:openBattlefield(args)
     local id = self.session.assignments[cell]
     self.locationArgs = nil
     self.bonusSelected, self.reserveFirst = {}, 1
+    self.exhaustOptions, self.exhaustSelected = {}, {}
     self.battlefieldArgs = args
+    if self.engagementPreview then self.engagementPreview:clear() end
+    self:layoutEngagementEffect(self:engagementProjection())
     self.card, self.selected, self.test, self.error, self.first = {}, {}, nil, nil, 1
     local location = self.session.locations.byId[id]
     local target = args.targetCell and self.session.locations.byId[self.session.assignments[args.targetCell]]
@@ -61,12 +74,31 @@ function Panel:openLocation(kind)
     if self.preview then self:loadImage(self.preview.settings.talentDirectory .. "/" .. self.tests[1].talent .. ".png") end
 end
 function Panel:evaluate()
-    local action = self.locationArgs and require("src.sys.location_actions") or self.battlefieldArgs and require("src.sys.battlefield_action") or Action
+    local action = self.locationArgs and require("src.sys.location_actions") or self.battlefieldArgs and BattlefieldAction or Action
     return action.evaluate(self.session, self.agentId, self:args())
 end
-function Panel:close() self.card, self.pressed, self.pointerX, self.pointerY, self.battlefieldArgs = nil, nil, nil, nil, nil end
+function Panel:engagementProjection(evaluation)
+    if evaluation then return evaluation.engagementProjection end
+    local args = self.battlefieldArgs
+    if args and args.battlefieldKind == "engage" then
+        return BattlefieldAction.previewEngagement(self.session, self.agentId, args.clash)
+    end
+end
+function Panel:layoutEngagementEffect(projection)
+    self.engagementEffectHeight = projection and self.settings.engagementEffectHeight or 0
+    self.height = self.settings.height + self.engagementEffectHeight
+    if not projection and self.engagementPreview then self.engagementPreview:clear() end
+end
+function Panel:close()
+    self.card, self.pressed, self.pointerX, self.pointerY, self.battlefieldArgs = nil, nil, nil, nil, nil
+    self:layoutEngagementEffect()
+end
+function Panel:update(dt)
+    if self.engagementPreview then self.engagementPreview:update(dt) end
+end
 function Panel:release()
     self:close()
+    if self.engagementPreview then self.engagementPreview:release(); self.engagementPreview = nil end
     for _, image in pairs(self.images) do if image then image:release() end end
     self.images, self.locationImage, self.agentImage = {}, nil, nil
 end
@@ -76,16 +108,31 @@ function Panel:columns()
     local width = self.width - self.settings.testInset - 14
     return math.floor(left + width / 4), math.floor(left + width * 3 / 4)
 end
+function Panel:bonusCounts()
+    local counts = {}
+    for _, entry in ipairs(Reserve.entries(self.session.fatePool)) do
+        if self.bonusSelected and self.bonusSelected[entry] then counts[entry.tileId] = (counts[entry.tileId] or 0) + 1 end
+    end
+    return counts
+end
+function Panel:bonusCost()
+    if not self.card or not self.test then return end
+    local counts = self:bonusCounts()
+    if not next(counts) then return end
+    local commitment = Reserve.evaluate(self.session.fatePool, counts)
+    return commitment and commitment.cost
+end
 function Panel:args()
     local ids = {}
     for _, card in ipairs(self.session.agentCards.byAgent[self.agentId].hand) do
         if self.selected[card.instanceId] then ids[#ids + 1] = card.instanceId end
     end
-    local counts = {}
-    for _,entry in ipairs(require("src.sys.fate_reserve").entries(self.session.fatePool)) do
-        if self.bonusSelected and self.bonusSelected[entry] then counts[entry.tileId] = (counts[entry.tileId] or 0) + 1 end
+    local args = { bonusCounts = self:bonusCounts(), instanceId = self.card.instanceId, testId = self.test and self.test.id, committedIds = ids }
+    args.exhaustIds = {}
+    for _, option in ipairs(self.exhaustOptions or {}) do
+        local id = option.asset.instanceId
+        if self.exhaustSelected[id] then args.exhaustIds[#args.exhaustIds + 1] = id end
     end
-    local args = { bonusCounts = counts, instanceId = self.card.instanceId, testId = self.test and self.test.id, committedIds = ids }
     for key, value in pairs(self.battlefieldArgs or {}) do args[key] = value end
     for key,value in pairs(self.locationArgs or {}) do args[key] = value end
     return args
@@ -95,11 +142,11 @@ function Panel:contribution(card)
     return Values.sum(self.session.agentCards.definitions.byId[card.cardId].talents or {}, self.test.talent)
 end
 function Panel:reserveBounds()
-    return { x = self.x + 14, y = self.y + self.settings.reserveTop,
+    return { x = self.x + 14, y = self.y + self.settings.reserveTop + self.engagementEffectHeight,
         width = self.width - 28, height = self.settings.reserveTileHeight }
 end
 function Panel:reserveTiles()
-    local entries = require("src.sys.fate_reserve").entries(self.session.fatePool)
+    local entries = Reserve.entries(self.session.fatePool)
     local box, c = self:reserveBounds(), self.settings
     local step = c.reserveTileWidth + c.reserveGap
     local capacity = math.max(1, math.floor((box.width + c.reserveGap) / step))
@@ -136,6 +183,14 @@ function Panel:hit(x, y, hand)
         end
     end
     for _, button in ipairs(self:buttons()) do if self:rowContains(x, y, button) then return tostring(button.id), button.id end end
+    if self.test and self.equipment then
+        for _, option in ipairs(self.exhaustOptions or {}) do
+            local left, top, width, height = self.equipment:bounds(option.asset.start, option.asset.size)
+            if x and y and x >= left and x < left + width and y >= top and y < top + height then
+                return "asset:" .. option.asset.instanceId, option
+            end
+        end
+    end
     local entry = hand:hover(x, y)
     if entry and y < entry.y + hand.settings.height and self:contribution(entry.card) > 0 then
         return "card:" .. entry.card.instanceId, entry.card
@@ -150,6 +205,11 @@ function Panel:releasePointer(x, y, hand)
     if type(value) == "table" and value.bonusEntry then
         self.bonusSelected[value.bonusEntry] = not self.bonusSelected[value.bonusEntry]
         self.error = nil
+    elseif type(value) == "table" and value.asset then
+        if self.test then
+            local id = value.asset.instanceId
+            self.exhaustSelected[id] = not self.exhaustSelected[id]
+        end
     elseif type(value) == "table" then self.selected[value.instanceId] = not self.selected[value.instanceId]
     elseif type(value) == "number" then self.test, self.selected, self.error = self.tests[value], {}, nil
     elseif value == "cancel" then self:close()
@@ -167,6 +227,8 @@ function Panel:releasePointer(x, y, hand)
     if self.session.audio then self.session.audio:playOverlapping("selection") end
 end
 function Panel:wheel(x, y, delta)
+    local preview = self.engagementPreview and self.engagementPreview.card
+    if preview and preview:wheel(delta) then return true end
     if not inside(x, y, self) then return false end
     if inside(x,y,self:reserveBounds()) then
         local _,capacity,total = self:reserveTiles()
@@ -181,6 +243,11 @@ end
 function Panel:draw(hand, font, heading)
     if not self.card then return end
     local g, c = love.graphics, self.settings
+    local evaluation, reason
+    if self.test then evaluation, reason = self:evaluate() end
+    local projection = self:engagementProjection(evaluation)
+    self:layoutEngagementEffect(projection)
+    local offset = self.engagementEffectHeight
     g.push("all"); g.setFont(font)
     g.setColor(c.background); g.rectangle("fill", self.x, self.y, self.width, self.height)
     g.setColor(c.accent); g.rectangle("line", self.x, self.y, self.width, self.height)
@@ -191,9 +258,21 @@ function Panel:draw(hand, font, heading)
     if #self.tests > c.rows then
         g.print("SCROLL " .. self.first .. "-" .. math.min(#self.tests, self.first + c.rows - 1) .. "/" .. #self.tests, self.x + 14, self.y + 56)
     end
-    local evaluation, reason
-    if self.test then evaluation, reason = self:evaluate() end
     local locationColumn, agentColumn = self:columns()
+    local agent = self.session.agentCards.agents.byId[self.agentId]
+    local status = self.session.agentStatus.byAgent[self.agentId]
+    local forceBonus = 0
+    local kind = self.battlefieldArgs and self.battlefieldArgs.battlefieldKind
+    if projection then
+        forceBonus = projection.effect.forceBonusAfter
+    elseif kind and BattlefieldRules.actions[kind] then
+        forceBonus = Passives.battlefieldBonus(self.session.armies, self.session.agentDeployment.placements[self.agentId], kind)
+    end
+    local function drawValue(column, value, number, color, y)
+        local width = font:getWidth(tostring(value))
+        g.setColor(color)
+        g.print(number, column - math.floor(width / 2) + width - font:getWidth(number), y)
+    end
     local function imageInBox(image, x, y, size, fallback)
         if image then
             local scale = math.min(size / image:getWidth(), size / image:getHeight())
@@ -248,11 +327,12 @@ function Panel:draw(hand, font, heading)
             elseif test.kind ~= "interact" then
                 g.print("(" .. test.kind:upper() .. ")", self.x + 14 + c.iconSize + c.iconGap, labelY)
             end
-            local base = Values.sum(self.session.agentCards.agents.byId[self.agentId].talents or {}, test.talent)
-            for i, number in ipairs({ test.value, base }) do
-                local column = i == 1 and locationColumn or agentColumn
-                g.print(tostring(number), math.floor(column - font:getWidth(tostring(number)) / 2), labelY)
-            end
+            local number, color = Difficulty.format(test, test.value, c.text)
+            drawValue(locationColumn, test.value, number, color, labelY)
+            local base, modifier = Values.effective(agent, test.talent, status)
+            local strength = selected and evaluation and (evaluation.base + evaluation.bonus) or (base + forceBonus)
+            number, color = Difficulty.strength(strength, base - modifier, c.text)
+            drawValue(agentColumn, strength, number, color, labelY)
         else
             g.setFont(heading or font)
             g.setColor(button.id == "cancel" and c.cancelColor or enabled and c.text or c.muted)
@@ -262,28 +342,64 @@ function Panel:draw(hand, font, heading)
         end
     end
     g.setFont(font)
+    if projection then
+        self.engagementPreview = self.engagementPreview or EngagementPreview.new(self.session)
+        g.push("all")
+        self.engagementPreview:draw(self, projection.effect)
+        g.pop()
+    end
     if #self.tests == 0 then g.print(c.labels.empty:upper(), self.x + 14, self.y + c.rowsTop) end
     if self.test then
         g.setColor(c.text)
         if evaluation then
-            g.printf(self.test.talent:upper() .. " " .. evaluation.base .. " + CARDS " .. (evaluation.cardBonus or evaluation.bonus) .. " + BONUS " .. (evaluation.reserveBonus or 0)
-                .. " = " .. (evaluation.base + evaluation.bonus) .. " VS " .. self.test.value .. " (BEFORE FATE)",
-                self.x + 14, self.y + c.summaryTop, self.width - 28, "center")
+            local summary = self.test.talent:upper() .. " " .. evaluation.base .. " + CARDS " .. (evaluation.cardBonus or evaluation.bonus) .. " + BONUS " .. (evaluation.reserveBonus or 0)
+                .. ((evaluation.assetBonus or 0) > 0 and " + ASSET " .. evaluation.assetBonus or "")
+                .. Difficulty.forceTerms(evaluation)
+                .. " = "
+            local total = evaluation.base + evaluation.bonus
+            local _, strengthColor = Difficulty.strength(total, Values.sum(agent.talents or {}, self.test.talent), c.text)
+            local line = Difficulty.line(" VS ", self.test, self.test.value, c.text, " (BEFORE FATE)")
+            local summaryLine = { c.text, summary, strengthColor, tostring(total), unpack(line) }
+            g.setColor(1, 1, 1, 1)
+            g.printf(summaryLine,
+                self.x + 14, self.y + c.summaryTop + offset, self.width - 28, "center")
         end
-        g.setColor(c.muted); g.printf(c.labels.commit:upper(), self.x + 14, self.y + c.commitTop, self.width - 28, "center")
+        local cost = Tile.costText(self:bonusCost())
+        g.setColor(cost and c.accent or c.muted)
+        g.printf(cost and ("BONUS COST  " .. cost) or c.labels.commit:upper(),
+            self.x + 14, self.y + c.commitTop + offset, self.width - 28, "center")
+        local function highlight(x, y, w, h, amount, selected, verb)
+            if amount <= 0 then
+                g.setColor(0, 0, 0, 0.5)
+                g.rectangle("fill", x, y, w, h)
+                return
+            end
+            if selected then
+                g.setColor(c.accent[1], c.accent[2], c.accent[3], c.selectedAlpha)
+                g.rectangle("fill", x, y, w, h)
+            end
+            g.setColor(c.accent)
+            g.rectangle("line", x, y, w, h)
+            local label = (selected and "ADDED" or verb) .. " +" .. amount
+            if font:getWidth(label) + 4 > w then label = (selected and "[+] " or "+") .. amount end
+            local badge = font:getWidth(label) + 4
+            g.setColor(c.background)
+            g.rectangle("fill", x + w - badge, y, badge, math.min(h, font:getHeight() + 4))
+            g.setColor(c.accent)
+            g.print(label, x + w - badge + 2, y + 2)
+        end
         for _, entry in ipairs(hand.entries) do
             local amount = self:contribution(entry.card)
             local selected = self.selected[entry.card.instanceId]
             local height = math.min(hand.settings.height, hand.step > 0 and hand.step or hand.settings.height)
-            if amount > 0 then
-                if selected then
-                    g.setColor(c.accent[1], c.accent[2], c.accent[3], 0.16)
-                    g.rectangle("fill", entry.x, entry.y, hand.width, height)
-                end
-                g.setColor(c.accent); g.rectangle("line", entry.x, entry.y, hand.width, height)
-                g.setColor(c.background); g.rectangle("fill", entry.x + hand.width - 62, entry.y, 62, 18)
-                g.setColor(c.accent); g.print((selected and "ADDED +" or "COMMIT +") .. amount, entry.x + hand.width - 60, entry.y + 2)
-            else g.setColor(0, 0, 0, 0.5); g.rectangle("fill", entry.x, entry.y, hand.width, height) end
+            highlight(entry.x, entry.y, hand.width, height, amount, selected, "COMMIT")
+        end
+        if self.equipment then
+            for _, option in ipairs(self.exhaustOptions or {}) do
+                local asset = option.asset
+                local x, y, w, h = self.equipment:bounds(asset.start, asset.size)
+                highlight(x, y, w, h, option.amount, self.exhaustSelected[asset.instanceId], "EXHAUST")
+            end
         end
     end
     local tiles,capacity,total = self:reserveTiles()
@@ -292,7 +408,10 @@ function Panel:draw(hand, font, heading)
         local definition = self.session.fatePool.definitions[tile.entry.tileId]
         local selected = self.bonusSelected and self.bonusSelected[tile.entry]
         local hovered = inside(self.pointerX,self.pointerY,tile)
-        if hovered then hoverName = definition.name or tile.entry.tileId end
+        if hovered then
+            local cost = Tile.costText(definition.extra_cost)
+            hoverName = (definition.name or tile.entry.tileId) .. (cost and (" / COST  " .. cost) or "")
+        end
         if selected then
             g.setColor(c.accent[1],c.accent[2],c.accent[3],c.selectedAlpha)
             g.rectangle("fill",tile.x,tile.y,tile.width,tile.height)
@@ -312,8 +431,10 @@ function Panel:draw(hand, font, heading)
     local reserveText = total == 0 and "BONUS RESERVE: EMPTY" or "BONUS RESERVE / CLICK TILES TO COMMIT"
     if hoverName then reserveText = hoverName .. " / CLICK TO TOGGLE" end
     if total > capacity then reserveText = reserveText .. " / SCROLL " .. self.reserveFirst .. "-" .. (self.reserveFirst+#tiles-1) .. "/" .. total end
-    g.printf(reserveText,self.x+14,self.y+263,self.width-28,"center")
-    if self.error or reason then g.setColor(c.failure); g.printf((self.error or reason):upper(), self.x + 14, self.y + c.errorTop, self.width - 28, "center") end
+    g.printf(reserveText,self.x+14,self.y+263+offset,self.width-28,"center")
+    if self.error or reason then g.setColor(c.failure); g.printf((self.error or reason):upper(), self.x + 14, self.y + c.errorTop + offset, self.width - 28, "center") end
     g.pop()
+    local effectCard = self.engagementPreview and self.engagementPreview.card
+    if effectCard then effectCard:draw() end
 end
 return Panel

@@ -1,7 +1,10 @@
 local Config = require("data.battlefield_view")
+local Battlefield = require("src.sys.battlefield_state")
+local ForcePreview = require("src.ui.force_preview")
 local Inspect = {}
 local function hit(bounds, x, y)
-    return bounds and x >= bounds.x and x < bounds.x + bounds.width and y >= bounds.y and y < bounds.y + bounds.height
+    return bounds and x and y and x >= bounds.x and x < bounds.x + bounds.width
+        and y >= bounds.y and y < bounds.y + bounds.height
 end
 local function blocked(state)
     return state.transition or (state.actions and state.actions.open) or (state.drag and (state.drag.card or state.drag.pending or state.drag.active))
@@ -32,6 +35,7 @@ function Inspect.mousepressed(state, x, y, button)
     -- Clear any pressed controls and other previews before capturing map input.
     state:focus(false)
     state.battlefieldInspectionCell = target
+    Inspect.pointer(state, x, y)
     return true
 end
 function Inspect.mousereleased(state, button)
@@ -41,10 +45,34 @@ function Inspect.mousereleased(state, button)
     end
     return state.battlefieldInspectionCell ~= nil
 end
+local function syncPreview(state)
+    local layout = state.battlefieldInspectionLayout
+    local x, y = state.battlefieldPointerX, state.battlefieldPointerY
+    local id
+    if layout and hit(layout.viewport, x, y) then
+        for _, row in ipairs(layout.rows) do
+            if hit(row, x, y + (state.battlefieldScroll or 0)) then id = row.id; break end
+        end
+    end
+    if id and not state.battlefieldForcePreview then
+        state.battlefieldForcePreview = ForcePreview.new(state.session or state)
+    end
+    if state.battlefieldForcePreview then
+        state.battlefieldForcePreview:show(id, layout and layout.panel)
+    end
+end
+function Inspect.pointer(state, x, y)
+    if not state.battlefieldInspectionCell then return false end
+    state.battlefieldPointerX, state.battlefieldPointerY = x, y
+    syncPreview(state)
+    return true
+end
 function Inspect.wheel(state, delta)
     if not state.battlefieldInspectionCell or blocked(state) then return false end
+    if state.battlefieldForcePreview and state.battlefieldForcePreview:wheel(delta) then return true end
     state.battlefieldScroll = math.max(0, math.min(state.battlefieldScrollMax or 0,
         (state.battlefieldScroll or 0) - delta * Config.inspection.scrollStep))
+    syncPreview(state)
     return true
 end
 function Inspect.update(state)
@@ -67,7 +95,7 @@ function Inspect.draw(state)
     if not cell or blocked(state) then return end
     local s = state.session or state
     local pair, location = s.armies.byCell[cell], s.locations and s.locations.byId[s.assignments[cell]]
-    if not pair or not location then return end
+    if not pair or not location then Inspect.clear(state); return end
     if not state.forcePortraits then state.forcePortraits = require("src.ui.force_portraits").new(s) end
     local enemies, allies = groups(pair.enemy), groups(pair.allied)
     local c, g = Config.inspection, love.graphics
@@ -126,7 +154,15 @@ function Inspect.draw(state)
         cursorX, lineHeight = cursorX + pairWidth + c.talentGap, math.max(lineHeight, iconHeight)
     end
     local protectionTop = talentTop + cursorY + lineHeight + c.gap
-    local armyTop = protectionTop + font:getHeight() + c.gap
+    local protection = Battlefield.protection(s.armies, cell)
+    local protectionText = "ALLIED PROTECTION " .. protection.stored .. "/" .. protection.cap
+    for _, source in ipairs(protection.sources) do
+        protectionText = protectionText .. " + " .. source.value .. " " .. source.label
+    end
+    local textWidth = width - 2 * c.padding
+    local _, protectionLines = font:getWrap(protectionText, textWidth)
+    local protectionHeight = font:getHeight() * (1 + (#protectionLines - 1) * font:getLineHeight())
+    local armyTop = protectionTop + math.ceil(protectionHeight) + c.gap
     local countsTop = armyTop + font:getHeight() + 7
     local portraitTop = countsTop + font:getHeight() + c.gap
     local contentHeight = count * rowHeight
@@ -135,6 +171,11 @@ function Inspect.draw(state)
     state.battlefieldScrollMax = math.max(0, contentHeight - viewportHeight)
     state.battlefieldScroll = math.min(state.battlefieldScroll or 0, state.battlefieldScrollMax)
     local y = math.max(4, math.min(c.y, (state.height or 720) - height - 4))
+    local layout = {
+        panel = { x = c.x, y = y, width = width, height = height },
+        viewport = { x = c.x + c.padding, y = y + portraitTop, width = width - 2 * c.padding, height = viewportHeight },
+        rows = {},
+    }
     g.push("all"); g.setFont(s.scene.accents.small)
     g.setColor(Config.background); g.rectangle("fill", c.x, y, width, height)
     g.setColor(Config.frame); g.rectangle("line", c.x, y, width, height)
@@ -152,7 +193,7 @@ function Inspect.draw(state)
     if #talents == 0 then
         g.setColor(Config.muted); g.print("NO BATTLEFIELD ACTIONS", c.x + c.padding, y + talentTop)
     end
-    g.setColor(Config.allied); g.print("ALLIED PROTECTION " .. pair.protection .. "/2", c.x + c.padding, y + protectionTop)
+    g.setColor(Config.allied); g.printf(protectionText, c.x + c.padding, y + protectionTop, textWidth)
     for index, side in ipairs({ "enemy", "allied" }) do
         local army = pair[side]
         local total, counts = require("src.sys.army_value").calculate(army, s.armies.catalogue, s.armies.rules)
@@ -160,13 +201,15 @@ function Inspect.draw(state)
         g.setColor(Config[side]); g.print((side == "enemy" and "ENEMIES " or "ALLIES ") .. total, x, y + armyTop)
         g.setColor(Config.muted); g.print(counts.regular .. " REG / " .. counts.elite .. " ELITE", x, y + countsTop)
         g.push("all")
-        local clipX, clipY = g.transformPoint(c.x + c.padding, y + portraitTop)
-        local clipRight, clipBottom = g.transformPoint(c.x + width - c.padding, y + portraitTop + viewportHeight)
+        local viewport = layout.viewport
+        local clipX, clipY = g.transformPoint(viewport.x, viewport.y)
+        local clipRight, clipBottom = g.transformPoint(viewport.x + viewport.width, viewport.y + viewport.height)
         g.intersectScissor(clipX, clipY, clipRight - clipX, clipBottom - clipY)
         local entries = index == 1 and enemies or allies
         if #entries == 0 then g.print("NO FORCES", x, y + portraitTop + 12) end
         for i, group in ipairs(entries) do
-            local top = y + portraitTop + (i - 1) * rowHeight - state.battlefieldScroll
+            local rowTop = y + portraitTop + (i - 1) * rowHeight
+            local top = rowTop - state.battlefieldScroll
             local left = x
             state.forcePortraits:draw(group.id, left, top)
             local definition = s.armies.catalogue.byId[group.id]
@@ -178,6 +221,8 @@ function Inspect.draw(state)
                 g.print(c.eliteLabel, left + portraitWidth - eliteWidth, top + portraitHeight + 4)
             end
             local imageWidth, imageHeight = state.forcePortraits:dimensions(group.id)
+            layout.rows[#layout.rows + 1] = { id = group.id, x = left, y = rowTop, width = portraitWidth,
+                height = portraitHeight + math.ceil(captionHeight) }
             g.setColor(Config.text)
             g.print("x" .. group.count, left + imageWidth + c.quantityGap,
                 top + math.floor((imageHeight - font:getHeight()) / 2))
@@ -192,13 +237,19 @@ function Inspect.draw(state)
         g.setColor(Config.allied); g.rectangle("fill", c.x + width - 7, top, 4, thumbHeight)
     end
     g.pop()
+    state.battlefieldInspectionLayout = layout
+    syncPreview(state)
+    if state.battlefieldForcePreview then state.battlefieldForcePreview:draw() end
 end
 function Inspect.clear(state)
     state.battlefieldInspectionCell, state.battlefieldScroll, state.battlefieldScrollMax = nil, 0, nil
+    state.battlefieldInspectionLayout, state.battlefieldPointerX, state.battlefieldPointerY = nil, nil, nil
+    if state.battlefieldForcePreview then state.battlefieldForcePreview:show(nil) end
 end
 function Inspect.release(state)
     Inspect.clear(state)
     state.battlefieldDismissPressed = nil
+    if state.battlefieldForcePreview then state.battlefieldForcePreview:release(); state.battlefieldForcePreview = nil end
     if state.forcePortraits then state.forcePortraits:release(); state.forcePortraits = nil end
     if state.battlefieldNameFont then state.battlefieldNameFont:release(); state.battlefieldNameFont = nil end
     if state.battlefieldTalentAssets then state.battlefieldTalentAssets:release(); state.battlefieldTalentAssets = nil end

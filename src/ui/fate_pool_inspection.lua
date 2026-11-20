@@ -1,5 +1,6 @@
 local Config = require("data.fate_pool_inspection_view")
 local Display = require("src.sys.fate_pool_display")
+local Reserve = require("src.sys.fate_reserve")
 local Assets = require("src.sys.artwork_assets")
 local Tile = require("src.ui.fate_tile")
 local Inspect = {}
@@ -31,13 +32,16 @@ end
 local function open(state)
     local c = Config
     local session = state.session or state
-    local model = Display.pool(session.fatePool)
+    local pool = session.fatePool
+    local main = Display.pool(pool)
+    local model = { rows = Reserve.rows(pool), total = main.total, bonusTotal = #Reserve.entries(pool) }
+    for _, row in ipairs(main.rows) do model.rows[#model.rows + 1] = row end
     local x, y = math.floor((state.width - c.width) / 2), math.floor((state.height - c.height) / 2)
     local bodyY, bodyHeight = y + c.listTop, c.height - c.listTop - c.padding
     local detailX = x + c.padding + c.listWidth + c.gap
     state:focus(false, true)
     state.fatePoolInspection = {
-        x = x, y = y, width = c.width, height = c.height, model = model, mainModel = model, bonusModel = { rows = require("src.sys.fate_reserve").rows(session.fatePool), total = #require("src.sys.fate_reserve").entries(session.fatePool) }, selected = 1,
+        x = x, y = y, width = c.width, height = c.height, model = model, selected = 1,
         first = 1, sourceFirst = 1, capacity = math.floor((bodyHeight - 14) / c.rowHeight),
         assets = Assets.new(), close = { x = x + c.width - c.padding - 28, y = y + c.padding, width = 28, height = 26 },
         list = { x = x + c.padding, y = bodyY, width = c.listWidth, height = bodyHeight },
@@ -60,7 +64,6 @@ end
 
 local function hit(panel, x, y)
     if not inside(panel, x, y) or inside(panel.close, x, y) then return "close" end
-    if y >= panel.y + 38 and y < panel.y + 62 then return "tab" end
     if inside(panel.list, x, y) then
         local offset = math.floor((y - panel.list.y) / Config.rowHeight)
         local index = panel.first + offset
@@ -101,10 +104,6 @@ function Inspect.mousereleased(state, x, y, button)
             panel.pressed = nil
             if target and target == pressed then
                 if target == "close" then Inspect.release(state)
-                elseif target == "tab" then
-                    panel.bonusTab = not panel.bonusTab
-                    panel.model = panel.bonusTab and panel.bonusModel or panel.mainModel
-                    panel.selected,panel.first,panel.sourceFirst = 1,1,1
                 else panel.selected, panel.sourceFirst, panel.sourceCapacity = target, 1, nil end
             end
         end
@@ -170,20 +169,22 @@ local function drawPanel(state, panel, fonts)
     g.setColor(c.accent); g.rectangle("line", panel.x + 0.5, panel.y + 0.5, panel.width - 1, panel.height - 1)
     g.setFont(fonts.heading); g.setColor(c.text); g.print(c.title, list.x, panel.y + c.padding)
     g.setFont(fonts.small); g.setColor(c.muted)
-    g.print((panel.bonusTab and "BONUS RESERVE: " or "FATE POOL: ") .. panel.model.total .. " TILES  /  CLICK TO SWITCH", list.x, panel.y + c.padding + 23)
+    g.print(panel.model.total .. " POOL TILES  /  " .. panel.model.bonusTotal .. " BONUS AVAILABLE",
+        list.x, panel.y + c.padding + 23)
     g.setColor(panel.hovered == "close" and c.highlight or c.row)
     g.rectangle("fill", panel.close.x, panel.close.y, panel.close.width, panel.close.height)
     g.setColor(c.text); centered(fonts.heading, "X", panel.close)
     g.setFont(fonts.small); g.setColor(c.muted); g.print("TILE TYPES", list.x, list.y - 16)
-    if panel.model.total == 0 then g.print("NO TILES IN POOL", list.x, list.y + 10) end
     local rows = panel.model.rows
+    if #rows == 0 then g.print("NO TILES AVAILABLE", list.x, list.y + 10) end
     local last = math.min(#rows, panel.first + panel.capacity - 1)
     for i = panel.first, last do
         local row, y = rows[i], list.y + (i - panel.first) * c.rowHeight
         g.setColor((panel.selected == i or panel.hovered == i) and c.highlight or c.row)
         g.rectangle("fill", list.x, y, list.width, c.rowHeight - 3)
-        g.setColor(c.text)
-        rowText(fonts.heading, row.name, row.quantity, list.x + 10, y + 8, list.width - 20)
+        g.setColor(row.bonus and c.accent or c.text)
+        local name = row.bonus and ("BONUS / " .. row.name) or row.name
+        rowText(fonts.heading, name, row.quantity, list.x + 10, y + 8, list.width - 20)
     end
     if #rows > panel.capacity then
         g.setFont(fonts.small); g.setColor(c.muted)
@@ -192,11 +193,15 @@ local function drawPanel(state, panel, fonts)
     end
     local row = rows[panel.selected]
     if not row then return end
-    local top = Tile.drawDetails(row, panel.assets, fonts, detail, c,
-        row.quantity .. " OF " .. panel.model.total .. " TILES") + 10
+    local total = row.bonus and panel.model.bonusTotal or panel.model.total
+    local tileType = row.bonus and " BONUS TILES" or " POOL TILES"
+    local top = Tile.drawDetails(row, panel.assets, fonts, detail, c, row.quantity .. " OF " .. total .. tileType) + 10
     g.setFont(fonts.small); g.setColor(c.muted)
     if row.bonus then
-        g.printf("COMMIT BEFORE A TEST.\nSPENT ON SUCCESS OR FAILURE.\nNOT DRAWN FROM THE FATE POOL.",detail.x+10,top,detail.width-20,"left")
+        local cost = Tile.costText(row.extraCost)
+        local instructions = "COMMIT BEFORE A TEST.\nSPENT ON SUCCESS OR FAILURE.\nNOT DRAWN FROM THE FATE POOL."
+        if cost then instructions = "COST PER TILE  " .. cost .. "\n\n" .. instructions end
+        g.printf(instructions, detail.x + 10, top, detail.width - 20, "left")
         return
     end
     g.print("CONTRIBUTORS", detail.x + 10, top)
@@ -217,7 +222,7 @@ local function drawPanel(state, panel, fonts)
     end
 end
 
-function Inspect.draw(state)
+function Inspect.drawButton(state)
     local session = state.session or state
     if not session.fatePool then return end
     local g, c, fonts = love.graphics, Config, session.scene.accents
@@ -229,7 +234,15 @@ function Inspect.draw(state)
     g.rectangle("line", box.x + 0.5, box.y + 0.5, box.width - 1, box.height - 1)
     g.setColor(enabled and c.text or c.muted)
     centered(fonts.small, c.title, box)
-    if state.fatePoolInspection then drawPanel(state, state.fatePoolInspection, fonts) end
+    g.pop()
+end
+
+function Inspect.draw(state)
+    local panel = state.fatePoolInspection
+    if not panel then return end
+    local g = love.graphics
+    g.push("all")
+    drawPanel(state, panel, (state.session or state).scene.accents)
     g.pop()
 end
 

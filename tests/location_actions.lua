@@ -92,5 +92,28 @@ return function(write)
     ok,r=Resolution.execute(s,"a","talent_test",{instanceId=door.instanceId,testId="unlock",
         committedIds={card.instanceId},bonusCounts={genius=2,insight=1},random={random=function() return 1 end}})
     assert(ok and r.success and r.total==8 and #Reserve.entries(s.fatePool)==0)
+    -- Paid commitments work on failure, and unaffordable or stale tests spend nothing.
+    s,enemies,door = setup()
+    local redline = require("data.fate_tiles.redline")
+    Reserve.add(s.fatePool, redline, 2)
+    s.fatePool.entries = {{tileId="autofail"}}
+    local status = s.agentStatus.byAgent.a
+    local paid = request("ingenuity", {redline=2})
+    status.defiance = 2
+    local evaluation, reason = require("src.sys.location_actions").evaluate(s, "a", paid)
+    assert(not evaluation and reason == "NOT ENOUGH DEFIANCE FOR BONUS TILES")
+    assert(not Resolution.prepare(s, "a", "location_action", paid))
+    status.defiance = 3
+    plan = assert(Resolution.prepare(s, "a", "location_action", paid))
+    assert(status.health == 10 and status.defiance == 3 and #Reserve.entries(s.fatePool) == 2)
+    status.health = 9
+    assert(not Resolution.commit(plan) and status.defiance == 3 and #Reserve.entries(s.fatePool) == 2)
+    -- Retaliation should start at the post-payment stats.
+    enemies[1].engagedAgentId = "a"
+    ok,r = Resolution.execute(s, "a", "location_action", paid)
+    assert(ok and not r.success and r.reserveBonus == 4 and #Reserve.entries(s.fatePool) == 0)
+    local hit = s.attackFeedback.events[1]
+    assert(hit.beforeHealth == 7 and hit.beforeDefiance == 1)
+    assert(status.health == 6 and status.defiance == 0 and status.defeated)
     write("location_actions_results.txt","PASS: CHARM, INGENUITY, unlimited bonus commitments, Glory, stale actions, encounter cards\n")
 end

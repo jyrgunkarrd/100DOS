@@ -58,8 +58,9 @@ function Feedback:start(record)
     self.outcomeProfile, self.outcomeImage, self.millingStart = nil, nil, nil
     self.millingSounded = false
     self.scanStart = nil
+    self.settings.hitTime = self.view.enterDuration + (record.test and self.view.drawDuration or 0)
     self.settings.stepDuration = self.settings.hitTime + self.view.holdDuration + self.view.exitDuration
-    if (record.battlefieldKind == "engage" or record.battlefieldKind == "bombard") and record.armiesBefore then
+    if record.armiesBefore then
         self.armyCutin = self.armyCutin or require("src.ui.battlefield_engagement_cutin").new(self.characterCutin, self.session)
         self.armyCutin.settings.reducedMotion = self.characterCutin.settings.reducedMotion
         self.cutin = self.armyCutin
@@ -102,18 +103,18 @@ end
 function Feedback:update(dt)
     if not self.record then return false end
     self.elapsed = self.elapsed + math.max(0, dt)
-    if self.elapsed >= self.view.enterDuration and not self.revealSounded then
+    if self.result.test and self.elapsed >= self.view.enterDuration and not self.revealSounded then
         self.revealSounded = true
         self.audio:playOverlapping("reveal")
     end
-    if self.elapsed >= self.settings.hitTime and not self.sounded then
+    if self.result.test and self.elapsed >= self.settings.hitTime and not self.sounded then
         self.sounded = true
         if self.result.success and self.result.test.kind == "strike" then
             self.audio:playOverlapping("strike")
             if self.result.defeated then self.audio:playOverlapping("defeat:" .. self.result.cardId) end
         end
     end
-    if self.elapsed >= self.settings.hitTime + self.view.resultSoundDelay and not self.resultSounded then
+    if self.result.test and self.elapsed >= self.settings.hitTime + self.view.resultSoundDelay and not self.resultSounded then
         self.resultSounded = true
         self.audio:playOverlapping(self.result.success and "success" or "failure")
     end
@@ -182,6 +183,7 @@ function Feedback:draw(width, height, font)
         return
     end
     self.cutin:draw(self, width, height, font)
+    if not self.result.test then return end
     local c, g, r = self.view, love.graphics, self.result
     local pose = self.cutin:pose(self)
     local outcome = self:outcomePose()

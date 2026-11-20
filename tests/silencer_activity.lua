@@ -21,9 +21,11 @@ return function(write)
         Effects.bind(session)
         return session
     end
-    local function nonTransportCount(session)
+    local function gloryCount(session)
         local n = 0
-        for _, entry in ipairs(session.fatePool.entries) do if not entry.transportEffect then n = n + 1 end end
+        for _, entry in ipairs(session.fatePool.entries) do
+            if entry.tileId == "autofail" and not entry.transportEffect then n = n + 1 end
+        end
         return n
     end
     local last = { random = function(_, n) return n end }
@@ -56,27 +58,27 @@ return function(write)
     local receipt = s.silencers.receipt
     assert(receipt.converted == 3 and receipt.blocked == 2 and receipt.damage == 2 and receipt.milled == 1)
     assert(s.jaclSecurity == 0 and #s.silencers.transports == 3)
-    assert(nonTransportCount(s) == 2)
+    assert(gloryCount(s) == 2)
     local mill = s.locationDecks:prepareMill("center", 2)
     assert(#mill.entered == 2 and s.locationDecks:commitMill("center", mill))
-    assert(nonTransportCount(s) == 4)
+    assert(gloryCount(s) == 4)
     local removed
     for _, id in ipairs(deck.inPlayOrder) do
         if deck.inPlay[id].cardId == "infected_intelligence" then removed = id; break end
     end
-    assert(s.locationDecks:discard("center", removed) and nonTransportCount(s) == 3)
+    assert(s.locationDecks:discard("center", removed) and gloryCount(s) == 3)
     require("src.sys.location_card_effects").sync(s)
-    assert(nonTransportCount(s) == 3, "Effects must not accumulate on repeated sync")
+    assert(gloryCount(s) == 3, "Glory contributions must not accumulate on repeated sync")
     -- Glory milling also reveals sabotage through the shared mill policy.
     local glory = fixture(20)
     glory.locationDecks.byCell.center.drawPile[20].cardId = "infected_intelligence"
     setGlory(glory, 1); boundary(glory)
-    assert(#glory.locationDecks.byCell.center.inPlayOrder == 1 and nonTransportCount(glory) == 2)
+    assert(#glory.locationDecks.byCell.center.inPlayOrder == 1 and gloryCount(glory) == 2)
     -- Last card still enters play and contributes its effect before mission failure.
     local empty = fixture(1)
     empty.locationDecks.byCell.center.drawPile[1].cardId = "infected_intelligence"
     setGlory(empty, 1); boundary(empty)
-    assert(empty.missionOutcome.reason == "jacl_deck_exhausted" and nonTransportCount(empty) == 2)
+    assert(empty.missionOutcome.reason == "jacl_deck_exhausted" and gloryCount(empty) == 2)
     -- Conversions never grow the deck or replace existing sabotage.
     local allSab = fixture(8)
     for _, card in ipairs(allSab.locationDecks.byCell.center.drawPile) do card.cardId = "infected_intelligence" end

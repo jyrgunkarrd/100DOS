@@ -1,6 +1,14 @@
 local View = require("data.talent_test_view")
 local Tile = {}
 
+function Tile.costText(cost)
+    if not cost then return end
+    local parts = {}
+    if (cost.dmg or 0) > 0 then parts[#parts + 1] = cost.dmg .. " HEALTH" end
+    if (cost.trm or 0) > 0 then parts[#parts + 1] = cost.trm .. " DEFIANCE" end
+    if #parts > 0 then return table.concat(parts, " + ") end
+end
+
 -- Draw the centered contents inside the feedback controller's frame and reveal mask.
 function Tile.draw(record, image, settings, font, color, alpha)
     local g = love.graphics

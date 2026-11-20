@@ -60,9 +60,13 @@ return function(write)
         for _,success in ipairs({true,false}) do
             local s = setup({value=0,special=success and "auto_success" or "auto_failure"})
             Reserve.add(s.fatePool,require("data.fate_tiles.genius"),3)
-            local a = args("security"); a.bonusCounts={genius=3}
+            Reserve.add(s.fatePool,require("data.fate_tiles.redline"),1)
+            local status = s.agentStatus.byAgent.a
+            local health, defiance = status.health, status.defiance
+            local a = args("security"); a.bonusCounts={genius=3,redline=1}
             local ok,r=Resolution.execute(s,"a","battlefield",a)
-            assert(ok and r.success==success and r.reserveBonus==3 and #Reserve.entries(s.fatePool)==0)
+            assert(ok and r.success==success and r.reserveBonus==5 and #Reserve.entries(s.fatePool)==0)
+            assert(status.health == health - 1 and status.defiance == defiance - 1)
         end
     end
     for _, kind in ipairs(require("data.jacl_actions").order) do
@@ -117,6 +121,7 @@ return function(write)
     -- Commitments are consumed on failure, but JACL tests never queue Clashes.
     s = setup({ value = 0, special = "auto_failure", clash = { amt = 1, en_dmg = 0, en_bonus = 0 } })
     local committed = args("security"); committed.committedIds = { "card1" }
+    s.agentCards.definitions.byId.boost.talents = { { type = committed.testId, qty = 1 } }
     assert(Resolution.execute(s, "a", "battlefield", committed))
     assert(#s.agentCards.byAgent.a.hand == 0 and #s.agentCards.byAgent.a.discardPile == 1)
     assert(require("src.sys.battlefield_clashes").count(s.armies.byCell.center) == 0)

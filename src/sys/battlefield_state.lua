@@ -1,4 +1,7 @@
 local Value = require("src.sys.army_value")
+local Defeat = require("src.sys.force_defeat")
+local Passives = require("src.sys.force_passives")
+local Rules = require("data.battlefield_rules")
 local State = {}
 function State.initialize(armies, assignments, jaclCellId)
     armies.jaclCellId, armies.revision = jaclCellId, armies.revision or 0
@@ -19,23 +22,35 @@ function State.touch(armies, cellId)
     pair.revision = (pair.revision or 0) + 1
     armies.revision = (armies.revision or 0) + 1
 end
-function State.damage(armies, cellId, side, damage)
+function State.protection(armies, cellId)
+    local stored = armies.byCell[cellId].protection or 0
+    local bonus, sources = Passives.locationProtection(armies, cellId)
+    return { stored = stored, cap = Rules.shieldCap, bonus = bonus, total = stored + bonus, sources = sources }
+end
+function State.prepareDamage(armies, cellId, side, damage, targetId)
     assert(type(damage) == "number" and damage >= 0 and damage < math.huge and damage % 1 == 0, "Invalid battlefield damage")
-    local pair, removed = armies.byCell[cellId], {}
-    local absorbed = side == "allied" and math.min(pair.protection, damage) or 0
-    if side == "allied" then pair.protection = pair.protection - absorbed end
-    local remaining = damage - absorbed
-    for _, strength in ipairs({ "regular", "elite" }) do
-        local survivors = {}
-        for _, unit in ipairs(pair[side].forces) do
-            if remaining > 0 and armies.catalogue.byId[unit.forceId].strength == strength then
-                removed[#removed + 1], remaining = unit, remaining - 1
-            else survivors[#survivors + 1] = unit end
-        end
-        pair[side].forces = survivors
+    local pair = armies.byCell[cellId]
+    local bonusAbsorbed, storedAbsorbed = 0, 0
+    if side == "allied" then
+        local protection = State.protection(armies, cellId)
+        -- The current force lineup provides fresh protection for this exchange.
+        bonusAbsorbed = math.min(protection.bonus, damage)
+        storedAbsorbed = math.min(protection.stored, damage - bonusAbsorbed)
     end
-    State.touch(armies, cellId)
-    return removed, absorbed
+    local absorbed = bonusAbsorbed + storedAbsorbed
+    local survivors, removed, replacements = Defeat.resolve(pair[side].forces, armies.catalogue, side, damage - absorbed, targetId)
+    return { cell = cellId, side = side, survivors = survivors, removed = removed, replacements = replacements,
+        absorbed = absorbed, bonusAbsorbed = bonusAbsorbed, storedAbsorbed = storedAbsorbed }
+end
+function State.commitDamage(armies, damage)
+    local pair = armies.byCell[damage.cell]
+    if damage.side == "allied" then pair.protection = pair.protection - damage.storedAbsorbed end
+    pair[damage.side].forces = damage.survivors
+    State.touch(armies, damage.cell)
+    return damage.removed, damage.absorbed, damage.replacements, damage.bonusAbsorbed
+end
+function State.damage(armies, cellId, side, damage)
+    return State.commitDamage(armies, State.prepareDamage(armies, cellId, side, damage))
 end
 function State.removeForce(armies, cellId, side, unitId)
     local forces = armies.byCell[cellId][side].forces
@@ -47,8 +62,8 @@ function State.removeForce(armies, cellId, side, unitId)
     error("Force no longer at target")
 end
 function State.entrench(armies, cellId)
-    local rules, pair = require("data.battlefield_rules"), armies.byCell[cellId]
-    pair.protection = math.min(rules.shieldCap, pair.protection + rules.entrenchGain)
+    local pair = armies.byCell[cellId]
+    pair.protection = math.min(Rules.shieldCap, pair.protection + Rules.entrenchGain)
     State.touch(armies, cellId)
 end
 function State.transfer(armies, from, to, unitId)

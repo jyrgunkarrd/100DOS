@@ -119,7 +119,7 @@ function Action:pointermoved(x, y)
     if self.session.phaseFeedback or self.session.phaseTransition then return end
     local footer = self.session.missionFooter
     if FateInspection.pointermoved(self, x, y) then footer:clearHover(); return end
-    if self.battlefieldInspectionCell then footer:clearHover(); return end
+    if BattlefieldInspection.pointer(self, x, y) then footer:clearHover(); return end
     if Inspection.panelPointer(self, x, y) then return end
     if footer:pointer(self.session, x, y) then
         self.session.agentView:clearHover(); Inspection.clear(self); return
@@ -227,6 +227,7 @@ function Action:focus(focused)
     FateInspection.focus(self, focused)
     Inspection.focus(self, focused)
     if not focused then
+        BattlefieldInspection.pointer(self, nil, nil)
         self.pending = nil
         self.session.agentView:clearHover()
     end
@@ -289,6 +290,7 @@ function Action:draw()
     require("src.ui.doom_clock").draw(s)
     HuntView.markers(s, s.scene.accents.small)
     s.missionFooter:draw(s)
+    FateInspection.drawButton(self)
     BattlefieldInspection.draw(self)
     Inspection.draw(self)
     FateInspection.draw(self)

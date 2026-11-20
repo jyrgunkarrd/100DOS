@@ -9,7 +9,9 @@ c.testHeading = "TALENTS"
 c.testColumns, c.testColumnGap, c.testValueFont = 2, 16, "small"
 c.talentOrder = { "steel", "fire", "reason", "rhyme", "purpose", "passion" }
 c.talentLabels = { steel = "STEEL", fire = "FIRE", reason = "REASON", rhyme = "RHYME", purpose = "PURPOSE", passion = "PASSION" }
-c.engagedColor = { 1, 68 / 255, 68 / 255, 1 }
+c.engagedColor = require("data.preparation_theme").penaltyColor
+c.talentBonusColor = require("data.preparation_theme").accent
+c.talentPenaltyColor = c.engagedColor
 c.edgeMargin, c.portraitGap = 16, 12
 c.inspectionSoundResetDelay = 0.3 -- Silence Agent switches and brief gaps within one inspection session.
 c.assetSlots = { size = 32, gap = 4, portraitGap = 12, label = "ASSETS", labelGap = 4,

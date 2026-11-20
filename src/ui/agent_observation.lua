@@ -118,7 +118,7 @@ function Observation:draw()
     self.exploration:draw(false)
     self.equipment:draw(self.fonts.small)
     for _, asset in ipairs(self.assets) do
-        Footprint.draw(self.equipment, asset, self.hand.images[asset.cardId or asset.card.cardId], self.fonts.heading,
+        Footprint.draw(self.equipment, asset, self.hand.images[asset.cardId or asset.card.cardId], self.fonts,
             require("data.card_play_view"))
     end
     self.hand:draw()

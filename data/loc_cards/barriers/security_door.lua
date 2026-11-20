@@ -5,6 +5,7 @@ return
     id = "security_door",
     name = "Security Door",
     card_type = "BARRIER",
+    blocks_explore = true,
     tags = { "lock", "door", "digital" },
     talent_tests = {
 
@@ -14,7 +15,7 @@ return
     },
     card_display = {
 
-        p1 = { "While this Barrier is revealed, this location cannot be Explored."},
+        p1 = { "While this Barrier is in play, this location cannot be Explored."},
 
     },
     card_bg = "none",

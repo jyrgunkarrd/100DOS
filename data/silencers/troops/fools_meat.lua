@@ -16,6 +16,11 @@ return
         { id = "evade", kind = "evade", val = 2 },
 
     },
+        card_display = {
+
+        p1 = { "While this SILENCER is revealed, add an INFILTRATION tile to the Fate pool."},
+
+    },
     sabotage = {
 
         "infected_intelligence",

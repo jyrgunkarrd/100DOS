@@ -9,15 +9,27 @@ return
     faction = "allied",
     card_display = {
 
-        p1 = { "+1 to a Battlefield Maneuver test. This effect applies once per test and does not stack." },
+        p1 = { "+1 to battlefield maneuver tests made by this allied army.\n\nThis effect stacks." },
 
+    },
+    passives = {
+        {
+            id = "hmmwv_maneuver_support",
+            label = "HMMWV",
+            effect = "battlefield_test_bonus",
+            action = "maneuver",
+            bonus = 1,
+            stacking = "per_force",
+        },
     },
     tags = {
 
+        "human",
         "vehicle",
         "reliable",
         "wretched",
 
     },
+    move_audio = "motor", 
 
 }

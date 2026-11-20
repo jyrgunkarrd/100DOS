@@ -112,10 +112,10 @@ function Action.prepare(s, id, input)
                     result.summary = count .. " TOP CARDS REVEALED"
                 else
                     local pair = armies.byCell[args.targetCell]
-                    local before = Record.capture(pair, armies.catalogue)
+                    local before = Record.capture(armies, args.targetCell)
                     local index = args.random and args.random:random(#pair.enemy.forces) or love.math.random(#pair.enemy.forces)
                     local unit = State.removeForce(armies, args.targetCell, "enemy", pair.enemy.forces[index].id)
-                    local exchange = Record.complete(before, Record.capture(pair, armies.catalogue), {
+                    local exchange = Record.complete(before, Record.capture(armies, args.targetCell), {
                         enemy = { damage = 1, absorbed = 0, removed = { unit } },
                         allied = { damage = 0, absorbed = 0, removed = {} } })
                     assert(decks:commitMill(args.targetCell, mill))

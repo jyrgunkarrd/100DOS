@@ -148,7 +148,7 @@ end
 
 function Deployment:pointermoved(x, y)
     if FateInspection.pointermoved(self, x, y) then return end
-    if self.battlefieldInspectionCell or Inspection.panelPointer(self, x, y) then return end
+    if BattlefieldInspection.pointer(self, x, y) or Inspection.panelPointer(self, x, y) then return end
     if not self:inputReady() then return end
     if x == nil or y == nil then self.readyPressed = false end
     self.drag:move(x, y)
@@ -203,6 +203,7 @@ function Deployment:focus(focused)
     FateInspection.focus(self, focused)
     Inspection.focus(self, focused)
     if not focused then
+        BattlefieldInspection.pointer(self, nil, nil)
         self.readyPressed = false
         self.drag:cancel()
         self.agentView:clearHover()
@@ -298,6 +299,7 @@ function Deployment:draw()
             love.graphics.pop()
         end
     end
+    FateInspection.drawButton(self)
     if not comparison then BattlefieldInspection.draw(self); Inspection.draw(self) end
     FateInspection.draw(self)
 end

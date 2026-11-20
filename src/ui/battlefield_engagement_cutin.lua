@@ -1,3 +1,4 @@
+local Difficulty = require("src.ui.test_difficulty")
 local Stack = require("src.ui.army_stack_layout")
 local Base = require("src.ui.attack_cutin")
 local Cutin = {}
@@ -43,8 +44,13 @@ function Cutin:bindRecord(record)
                 c.panelWidth - c.padding * 2 - c.liftDistance, c.stackHeight, direction, c)
         end
         local slots, byId = build(record.armiesBefore)
-        local _, after = build(record.armiesAfter)
-        self.layouts[side] = { slots = slots, byId = byId, after = after, direction = direction }
+        local finalSlots, after = build(record.armiesAfter)
+        local origins = {}
+        for _, unit in ipairs(result.removed) do
+            if unit.replacementId then origins[unit.replacementId] = byId[unit.id] end
+        end
+        self.layouts[side] = { slots = slots, byId = byId, after = after, finalSlots = finalSlots,
+            origins = origins, direction = direction }
     end
     return finish + c.resultHold
 end
@@ -111,28 +117,24 @@ function Cutin:draw(feedback, width, height, font)
             local army = (complete and r.armiesAfter or r.armiesBefore)[side]
             label(#army.forces .. " FORCES  /  STRENGTH " .. army.value, x, 36, c.panelWidth, feedback.settings.textColor, alpha)
             if side == "allied" then
-                local protection = (p.age >= s.impactDuration and r.armiesAfter or r.armiesBefore).protection
+                local before, after = r.armiesBefore, r.armiesAfter
+                local protection = before.protection
+                if complete then
+                    protection = after.protection
+                elseif p.age >= s.impactDuration then
+                    protection = protection - result.storedAbsorbed
+                end
                 label(c.labels.protection .. " " .. protection, x, 56, c.panelWidth, tint, alpha)
             end
             local settle = reduced and 1 or ease((p.age - timeline.casualtyEnd) / c.settleDuration)
-            local function card(slot, casualty)
+            local function card(slot, sx, sy, collapse, opacity, flash)
                 local unit, w, h = slot.unit, slot.width, slot.height
-                local sx, sy = slot.x, slot.y
-                local nextSlot = layout.after[unit.id]
-                if p.age >= timeline.casualtyEnd and nextSlot then
-                    sx, sy = sx + (nextSlot.x - sx) * settle, sy + (nextSlot.y - sy) * settle
-                end
-                local destruction = casualty and casualty.destruction or 0
-                if destruction >= 1 then return end
-                local lift = casualty and casualty.lift or 0
-                if not reduced then sx, sy = sx + direction * c.liftDistance * lift, sy - c.liftHeight * lift end
                 local cx = x + c.padding + (direction == -1 and c.liftDistance or 0) + sx
                 local cy = c.stackTop + sy
-                local opacity = alpha * (1 - destruction)
+                opacity = alpha * (opacity or 1)
                 g.push("all")
                 g.translate(math.floor(cx), math.floor(cy + h / 2))
-                local collapse = reduced and 1 or math.max(0.01, 1 - destruction * destruction)
-                g.scale(1, collapse); g.translate(0, -h / 2)
+                g.scale(1, collapse or 1); g.translate(0, -h / 2)
                 color(s.background, opacity); g.rectangle("fill", 0, 0, w, h)
                 self.portraits:draw(unit.forceId, 0, 0, nil, { 1, 1, 1, opacity })
                 color(unit.elite and c.eliteColor or tint, opacity)
@@ -141,31 +143,64 @@ function Cutin:draw(feedback, width, height, font)
                     color(s.background, opacity); g.rectangle("fill", 1, 1, 46, 14)
                     label(c.labels.elite, 1, 2, 46, c.eliteColor, opacity)
                 end
-                if destruction > 0 then
-                    g.setColor(1, 0.9, 0.75, opacity * 0.65 * (1 - clamp(destruction * 4)))
+                if flash and flash > 0 then
+                    g.setColor(1, 0.9, 0.75, opacity * flash)
                     g.rectangle("fill", 0, 0, w, h)
                 end
                 g.pop()
             end
-            for _, slot in ipairs(layout.slots) do
-                if not (receiving and self:casualtyPose(slot.unit.id, p.age)) then card(slot) end
-            end
-            -- Draw casualties above all survivors, in the actual rules removal order.
             local caption
-            if receiving then
+            local liftX = reduced and 0 or direction * c.liftDistance
+            local liftY = reduced and 0 or -c.liftHeight
+            if complete then
+                for _, slot in ipairs(layout.finalSlots) do
+                    local origin = layout.origins[slot.unit.id]
+                    local start = origin or layout.byId[slot.unit.id] or slot
+                    local sx, sy = start.x, start.y
+                    if origin then
+                        sx = sx + liftX + (origin.width - slot.width) / 2
+                        sy = sy + liftY + (origin.height - slot.height) / 2
+                    end
+                    card(slot, sx + (slot.x - sx) * settle, sy + (slot.y - sy) * settle)
+                end
+            else
+                for _, slot in ipairs(layout.slots) do
+                    if not self:casualtyPose(slot.unit.id, p.age) then card(slot, slot.x, slot.y) end
+                end
                 for _, unit in ipairs(result.removed) do
                     local casualty = self:casualtyPose(unit.id, p.age)
-                    if casualty and casualty.destruction < 1 then
+                    if casualty then
                         local slot = layout.byId[unit.id]
-                        card(slot, casualty); caption = slot.unit.name .. " - " .. c.labels.eliminated
+                        local sx, sy = slot.x + liftX * casualty.lift, slot.y + liftY * casualty.lift
+                        local progress = casualty.destruction
+                        local target = layout.after[unit.replacementId]
+                        if target then
+                            local tx = sx + (slot.width - target.width) / 2
+                            local ty = sy + (slot.height - target.height) / 2
+                            local arrow = font:hasGlyphs("→") and " → " or " -> "
+                            caption = ((unit.shortName or unit.name) .. arrow .. target.unit.name):upper()
+                            if reduced then
+                                if progress < 1 then card(slot, sx, sy) end
+                                if progress > 0 then card(target, tx, ty, 1, progress) end
+                            elseif math.abs(progress - 0.5) < 0.06 then
+                                color(s.agentColor, alpha)
+                                g.rectangle("fill", math.floor(x + c.padding + (direction == -1 and c.liftDistance or 0) + sx),
+                                    math.floor(c.stackTop + sy + slot.height / 2), slot.width, 2)
+                            elseif progress < 0.5 then
+                                card(slot, sx, sy, 1 - 2 * progress)
+                            else
+                                card(target, tx, ty, 2 * progress - 1)
+                            end
+                        elseif progress < 1 then
+                            card(slot, sx, sy, reduced and 1 or math.max(0.01, 1 - progress * progress),
+                                1 - progress, progress > 0 and 0.65 * (1 - clamp(progress * 4)))
+                            caption = slot.unit.name .. " - " .. c.labels.eliminated
+                        end
                     end
                 end
             end
-            local front = layout.slots[#layout.slots]
-            if complete then
-                front = nil
-                for _, slot in ipairs(layout.slots) do if layout.after[slot.unit.id] then front = slot end end
-            end
+            local lineup = complete and layout.finalSlots or layout.slots
+            local front = lineup[#lineup]
             label(caption or (front and front.unit.name or ""), x + 10, c.height - 37, c.panelWidth - 20,
                 feedback.settings.textColor, alpha)
             if p.hit then
@@ -180,7 +215,9 @@ function Cutin:draw(feedback, width, height, font)
             if receiving and result.absorbed > 0 and p.age >= 0 and p.age < timeline.casualtyStart then
                 color(s.agentColor, p.alpha * (1 - p.age / timeline.casualtyStart))
                 g.setLineWidth(3); g.rectangle("line", x + 5, 5, c.panelWidth - 10, c.height - 10); g.setLineWidth(1)
-                label("ABSORBED " .. result.absorbed, x, c.height - 58, c.panelWidth, s.agentColor)
+                local text = c.labels.absorbed .. " " .. result.absorbed
+                if result.bonusAbsorbed > 0 then text = text .. " (" .. result.bonusAbsorbed .. " FROM FORCES)" end
+                label(text, x, c.height - 58, c.panelWidth, s.agentColor)
             end
             if defeat then
                 color(s.enemyColor, alpha * 0.18); g.rectangle("fill", x + 2, 2, c.panelWidth - 4, c.height - 4)
@@ -191,7 +228,9 @@ function Cutin:draw(feedback, width, height, font)
             end
         end
     end
-    label((r.clash and c.labels.clash or c.labels[r.battlefieldKind] or c.labels.engage) .. "  /  " .. r.name, 0, -108, c.width, feedback.settings.textColor)
+    local heading = r.sourceName and r.sourceName:upper()
+        or (r.clash and c.labels.clash or c.labels[r.battlefieldKind] or c.labels.engage)
+    label(heading .. "  /  " .. r.name, 0, r.test and -108 or -28, c.width, feedback.settings.textColor)
     label("VS", c.panelWidth, c.height / 2, c.width - c.panelWidth * 2, feedback.settings.textColor)
     if p.impact > 0 and not reduced then
         for _, side in ipairs({ "enemy", "allied" }) do
@@ -203,20 +242,31 @@ function Cutin:draw(feedback, width, height, font)
             end
         end
     end
-    label(r.test.label .. " " .. r.difficulty, 0, c.height + 12, c.width, feedback.settings.textColor)
+    if r.test then
+        g.setColor(1, 1, 1, p.alpha)
+        g.printf(Difficulty.line(r.test.label .. " ", r.test, r.difficulty, feedback.settings.textColor), 0, c.height + 12, c.width, "center")
+    end
+    if r.beforeEngage then
+        local effect = r.beforeEngage
+        label(effect.sourceName .. " removed " .. effect.removedName .. " and added " .. effect.addedName,
+            0, c.height + 72, c.width, s.enemyColor)
+    end
     if p.hit then
-        local calculation = r.special and (r.success and "AUTO SUCCESS" or "AUTO FAILURE")
-            or r.base .. " + " .. r.committed .. " " .. (r.modifier >= 0 and "+" or "-") .. " "
-                .. math.abs(r.modifier) .. " = " .. r.total .. " vs " .. r.difficulty
-        label(calculation, 0, c.height + 30, c.width, feedback.settings.textColor)
-        local outcome = (r.success and "SUCCESS" or "FAILURE") .. " - " .. r.summary
+        local outcome
+        if r.test then
+            label(Difficulty.result(r), 0, c.height + 30, c.width, feedback.settings.textColor)
+            outcome = (r.success and "SUCCESS" or "FAILURE") .. " - " .. r.summary
+        else
+            outcome = r.targetName:upper() .. " HIT"
+        end
         local defeated = {}
         for _, side in ipairs({ "enemy", "allied" }) do
             if r.sides[side].defeated and p.age >= self.timelines[side].casualtyEnd then defeated[#defeated + 1] = side end
         end
         if #defeated == 2 then outcome = outcome .. " - " .. c.labels.bothDefeated
         elseif #defeated == 1 then outcome = outcome .. " - " .. c.labels[defeated[1]] .. " " .. c.labels.defeated end
-        label(outcome, 0, c.height + 50, c.width, r.success and s.agentColor or s.enemyColor)
+        label(outcome, 0, c.height + (r.test and 50 or 12), c.width,
+            (r.success or not r.test) and s.agentColor or s.enemyColor)
     end
     g.pop()
 end

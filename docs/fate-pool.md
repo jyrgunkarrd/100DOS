@@ -9,8 +9,8 @@ are separate tiles, including repeats within the same asset.
 Click **FATE POOL** below the Captain panel or press **F** in Deployment,
 Mission Action, or Agent Action. The inspection shows the total number of
 tiles in the built pool. Select a tile type to see its count, details, and contributing
-Agents, Captain, or JACL. Reveals sample the main pool with replacement. Bonus tiles are held separately
-in the unlimited shared BONUS RESERVE; use the modal switch to inspect them.
+Agents, Captain, or JACL. Reveals sample the main pool with replacement. Available tiles in the
+shared bonus reserve appear at the top of the list. Their count is shown separately from the draw pool.
 Before any test, commit any number with the clickable reserve tile row. Committed
 modifiers stack with cards and are consumed on either outcome. Cancelling spends
 nothing. Bonus tiles never dilute normal Fate probabilities or override automatic

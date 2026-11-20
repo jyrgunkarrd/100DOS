@@ -2,6 +2,8 @@ return {
     width = 470, top = 24, height = 378, rowHeight = 32, rows = 3,
     testInset = 146, rowsTop = 94, portraitTop = 48, portraitSize = 36,
     iconSize = 24, iconGap = 8, summaryTop = 202, commitTop = 224, errorTop = 248,
+    engagementEffectTop = 191, engagementEffectHeight = 218,
+    engagementEffectPortraitSize = 176, engagementEffectHold = 1, engagementEffectFade = 0.24,
     reserveTop = 278, reserveTileWidth = 40, reserveTileHeight = 48, reserveGap = 8, reserveValueHeight = 15,
     selectedAlpha = 0.16, hoverAlpha = 0.07,
     background = { 0.025, 0.04, 0.06, 0.98 }, accent = { 0.2, 0.85, 0.9, 1 },
@@ -20,6 +22,6 @@ return {
     haloDuration = 0.6, haloSpread = 24, haloAlpha = 0.65,
     evadeDuration = 0.3, evadeSweepWidth = 48, evadeSweepAlpha = 0.3,
     interactionDuration = 0.35, failureDuration = 0.2, failureDistance = 4,
-    labels = { choose = "Choose a test", clash = "CLASH", commit = "Click highlighted hand cards to commit; click again to undo.",
+    labels = { choose = "Choose a test", clash = "CLASH", commit = "Click highlighted cards to toggle their bonus.",
         confirm = ">", cancel = "X", empty = "No available tests", success = "SUCCESS", failure = "FAILURE" },
 }

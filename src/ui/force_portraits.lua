@@ -10,9 +10,7 @@ function Portraits:entry(id)
     local definition = self.session.armies.catalogue.byId[id]
     local entry = self.entries[id]
     if not entry then
-        local stem = definition.portrait or id
-        assert(type(stem) == "string" and stem:match("^[%w_-]+$"), "Invalid force portrait")
-        entry = { image = self.assets:load(require("data.battlefield_view").directory .. "/" .. stem .. ".png"),
+        entry = { image = self.assets:load(Resolver.forcePath(definition, id, require("data.battlefield_view").directory)),
             layers = self.assets:prepare(Resolver.resolve(definition, self.session.package.biomeId)) }
         self.entries[id] = entry
     end

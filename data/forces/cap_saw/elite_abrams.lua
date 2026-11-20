@@ -8,15 +8,27 @@ return
     faction = "allied",
     card_display = {
 
-        p1 = { "Cancel 1 damage from a failed Battlefield Engagement test. This effect applies once per test and does not stack." },
+        p1 = { "A location with this force has +1 protection. This effect stacks up to 2 times and can exceed the normal protection cap." },
 
+    },
+    passives = {
+        {
+            id = "abrams_protection",
+            label = "ABRAMS",
+            effect = "location_protection_bonus",
+            bonus = 1,
+            maximum = 2,
+            stacking = "per_force",
+        },
     },
     tags = {
 
+        "human",
         "vehicle",
         "armored",
         "wretched",
 
     },
+    move_audio = "motor", 
 
 }

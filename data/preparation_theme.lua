@@ -1,4 +1,5 @@
 return {
+    penaltyColor = { 1, 68 / 255, 68 / 255, 1 },
     healthColor = { 75 / 255, 177 / 255, 1, 1 }, -- #4bb1ff
     defianceColor = { 1, 174 / 255, 41 / 255, 1 }, -- #ffae29
     statSlashColor = { 90 / 255, 90 / 255, 90 / 255, 1 }, -- #5a5a5a

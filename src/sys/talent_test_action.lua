@@ -3,6 +3,7 @@ local Fate = require("src.sys.fate_draw")
 local Reveal = require("src.sys.fate_reveal")
 local Rules = require("data.talent_test_rules")
 local Effects = require("src.sys.location_card_effects")
+local Abilities = require("src.sys.asset_abilities")
 local Action = {}
 
 function Action.evaluate(session, agentId, args)
@@ -24,12 +25,14 @@ function Action.evaluate(session, agentId, args)
     local commitments, reason = require("src.sys.talent_commitments").evaluate(session, agentId, test.talent, args.committedIds, args.bonusCounts)
     if not commitments then return nil, reason end
     local handState, selected, base, bonus = commitments.handState, commitments.selected, commitments.base, commitments.bonus
+    local assets, assetBonus = Abilities.exhaustSelection(session, agentId, definition, args.exhaustIds)
+    if not assets then return nil, assetBonus end
     Fate.validate(session.fatePool)
     if require("src.sys.location_card_traits").enemy(definition) then
         assert(type(card.health) == "number" and card.health > 0, "Invalid enemy runtime health")
     end
     return { card = card, definition = definition, test = test, cell = cell, deck = deck,
-        handState = handState, selected = selected, base = base, bonus = bonus, cardBonus = commitments.cardBonus, reserveBonus = commitments.reserveBonus, cost = cost }
+        handState = handState, selected = selected, base = base, bonus = bonus + assetBonus, assets = assets, assetBonus = assetBonus, cardBonus = commitments.cardBonus, reserveBonus = commitments.reserveBonus, cost = cost }
 end
 
 function Action.prepare(session, agentId, args)
@@ -58,8 +61,12 @@ function Action.prepare(session, agentId, args)
                 or value.card.health ~= beforeHealth or value.card.exhausted ~= beforeExhausted
                 or value.card.engagedAgentId ~= beforeEngaged or #value.handState.hand ~= #beforeHand then return false end
             for i, card in ipairs(beforeHand) do if value.handState.hand[i] ~= card then return false end end
+            local current = Abilities.exhaustSelection(session, agentId, value.definition, args.exhaustIds)
+            if not current then return false end
+            for i, asset in ipairs(value.assets) do if current[i] ~= asset then return false end end
             -- Randomness occurs only after all stale-plan guards, immediately before publication.
             local effect = Reveal.prepare(session, result, value.base, value.bonus, value.test.value, args.random)
+            for _, asset in ipairs(value.assets) do asset.exhausted = true end
             value.handState.hand, value.handState.discardPile = hand, discard
             if result.success then
                 if value.test.effect == "damage" then

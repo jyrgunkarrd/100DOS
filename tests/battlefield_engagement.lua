@@ -24,14 +24,15 @@ return function(state, render)
             difficulty = 3, base = 3, committed = 0, modifier = side == "enemy" and 0 or -1,
             total = side == "enemy" and 3 or 2,
             success = side == "enemy" }
-        local before = Snapshot.capture(pair, armies.catalogue)
+        local before = Snapshot.capture(armies, "field")
         local exchanges = {}
         for _, receiver in ipairs({ "enemy", "allied" }) do
             local amount = receiver == side and damage or (otherDamage or 0)
-            local removed, absorbed = Battlefield.damage(armies, "field", receiver, amount)
-            exchanges[receiver] = { damage = amount, removed = removed, absorbed = absorbed }
+            local removed, absorbed, replacements, bonusAbsorbed = Battlefield.damage(armies, "field", receiver, amount)
+            exchanges[receiver] = { damage = amount, removed = removed, absorbed = absorbed,
+                replacements = replacements, bonusAbsorbed = bonusAbsorbed }
         end
-        local record = Snapshot.complete(before, Snapshot.capture(pair, armies.catalogue), exchanges)
+        local record = Snapshot.complete(before, Snapshot.capture(armies, "field"), exchanges)
         for key, value in pairs(record) do r[key] = value end
         return r
     end
@@ -69,7 +70,13 @@ return function(state, render)
     feedback:clear(); assert(not feedback:busy() and not cutin.record)
     r = result("allied", 2, 2, 7); cutin = start(r)
     assert(#r.sides.allied.removed == 0 and r.armiesAfter.protection == 0 and not r.sides.allied.defeated)
+    local alliedElite = kinds.allied.elite
+    kinds.allied.elite = "elite_abrams"
+    r = result("allied", 2, 0, 2, 0, "elite"); cutin = start(r)
+    assert(r.armiesBefore.protection == 2 and r.armiesAfter.protection == 2)
+    assert(r.sides.allied.bonusAbsorbed == 2 and #r.sides.allied.removed == 0)
     at(0.12, "battlefield_stack_protected.png")
+    kinds.allied.elite = alliedElite
     r = result("allied", 6, 1, 4); cutin = start(r)
     at(cutin.timelines.allied.casualtyStart + 0.18, "battlefield_stack_allied_loss.png")
     at(cutin.timelines.allied.casualtyEnd + 0.1, "battlefield_stack_defeat_scan.png")
@@ -147,6 +154,29 @@ return function(state, render)
     start(result("enemy", 2, 0, 4)); feedback:clear(); feedback:update(100)
     assert(explosions == before, "Cancelled playback cannot emit a pending explosion")
     feedback.audio.playOverlapping = play
+    kinds.allied.regular = "reg_vicky"
+    r = result("allied", 9, 0, 2, 0, "regular")
+    assert(#r.sides.allied.removed == 2 and not r.sides.allied.defeated)
+    for _, reduced in ipairs({ false, true }) do
+        feedback.characterCutin.settings.reducedMotion = reduced
+        cutin = start(r)
+        local timeline, layout = cutin.timelines.allied, cutin.layouts.allied
+        local first = r.sides.allied.removed[1]
+        assert(layout.origins[first.replacementId] == layout.byId[first.id])
+        local drawn, draw = {}, cutin.portraits.draw
+        function cutin.portraits:draw(id, ...)
+            drawn[id] = (drawn[id] or 0) + 1
+            return draw(self, id, ...)
+        end
+        local age = timeline.casualtyStart + cutin.view.liftDuration + cutin.view.casualtyHold
+        at(age + cutin.view.destructionDuration * 0.75, "battlefield_conversion.png")
+        assert(drawn.reg_cold_hand == 1 and drawn.reg_vicky >= 1)
+        drawn = {}
+        at(timeline.casualtyEnd + cutin.view.settleDuration, "battlefield_conversion_settled.png")
+        assert(drawn.reg_cold_hand == 2 and not drawn.reg_vicky)
+        cutin.portraits.draw = draw
+    end
+    feedback.characterCutin.settings.reducedMotion = false
     feedback:clear()
     feedback:start({ battlefield = true, battlefieldKind = "entrench", locationId = session.assignments["south"] })
     assert(feedback.cutin == feedback.characterCutin)

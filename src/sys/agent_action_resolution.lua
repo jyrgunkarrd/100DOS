@@ -2,10 +2,11 @@ local Status = require("src.sys.agent_status")
 local Opportunity = require("src.sys.opportunity_attacks")
 local Attack = require("src.sys.attack_resolution")
 local Engagement = require("src.sys.location_engagement")
+local Cost = require("src.sys.fate_bonus_cost")
 local Resolution = {}
 function Resolution.prepare(session, agentId, kind, args)
     local owned = {}; for key,value in pairs(args or {}) do owned[key] = value end
-    for _,key in ipairs({"committedIds", "bonusCounts"}) do
+    for _,key in ipairs({"committedIds", "bonusCounts", "exhaustIds"}) do
         if type(owned[key]) == "table" then
             local snapshot = {}; for k,v in pairs(owned[key]) do snapshot[k] = v end; owned[key] = snapshot
         end
@@ -20,6 +21,10 @@ function Resolution.prepare(session, agentId, kind, args)
     if session.pendingEndTurn and kind ~= "end_turn" and (kind ~= "battlefield" or not args.clash) then
         return nil, "FINISH THE PENDING CLASH"
     end
+    if args.exhaustIds ~= nil and (type(args.exhaustIds) ~= "table"
+        or (next(args.exhaustIds) and kind ~= "talent_test")) then
+        return nil, "INVALID ASSET SELECTION"
+    end
     local reserve = require("src.sys.fate_reserve")
     local selection, bonusReason = reserve.evaluate(session.fatePool, args.bonusCounts)
     if not selection then return nil, bonusReason end
@@ -31,6 +36,7 @@ function Resolution.prepare(session, agentId, kind, args)
         or kind == "battlefield" and "src.sys.battlefield_action"
         or kind == "end_turn" and "src.sys.agent_turn"
     local basic = kind == "move" or kind == "draw_card" or kind == "gain_resource"
+    if kind == "asset_ability" then module = "src.sys.asset_abilities" end
     if basic then module = "src.sys.agent_basic_actions" end
     assert(module, "Unknown Agent action")
     -- Snapshot attackers before preparing the action, excluding newly revealed Enemies.
@@ -38,6 +44,9 @@ function Resolution.prepare(session, agentId, kind, args)
     if not action then return nil, reason end
     local isTest = kind == "talent_test" or kind == "battlefield" or kind == "location_action"
     if not isTest and next(selection.counts) then return nil, "BONUS TILES REQUIRE A TEST" end
+    local payment, costReason = Cost.stage(status, selection.cost)
+    if not payment then return nil, costReason end
+    for key, value in pairs(payment) do action.status[key] = value end
     local poolBefore = session.fatePool
     local publish = action.publish
     if isTest then action.publish = function()
@@ -47,13 +56,17 @@ function Resolution.prepare(session, agentId, kind, args)
         for i, entry in ipairs(bonusBefore) do if current[i] ~= entry then return false end end
         if not publish() then return false end
         if session.fatePool then reserve.consume(session.fatePool, selection) end
-        if type(action.result) == "table" then action.result.reserveBonus = selection.value end
+        if type(action.result) == "table" then
+            action.result.reserveBonus = selection.value
+            if next(payment) then action.result.reserveCost = selection.cost end
+        end
         return true
     end end
     local requests = action.provokingKind == false and {} or Opportunity.collect(session, agentId, action.provokingKind or kind)
     local stagedStatus, before = {}, {}
     for key, value in pairs(status) do stagedStatus[key], before[key] = value, value end
     for key, value in pairs(action.status) do stagedStatus[key] = value end
+    -- Without protection this is the maximum possible harm. UI can stage its defeat transition safely.
     local final, events = Attack.resolve(stagedStatus, requests)
     local deckRevisions = {}
     if session.locationDecks then
@@ -61,6 +74,7 @@ function Resolution.prepare(session, agentId, kind, args)
     end
     local placement = session.agentDeployment and session.agentDeployment.placements[agentId]
     return { session = session, agentId = agentId, kind = kind, revision = session.actionRevision or 0,
+        requests = requests, stagedStatus = stagedStatus, harmRandom = args.harmRandom,
         before = before, action = action, status = final, events = events, deckRevisions = deckRevisions, placement = placement }
 end
 function Resolution.commit(plan)
@@ -81,11 +95,23 @@ function Resolution.commit(plan)
     if require("src.sys.mission_outcome").finished(s) then
         for key, value in pairs(plan.action.status) do status[key] = value end
         s.activeAgentId, s.attackFeedback, s.pendingEndTurn, s.pendingManeuver = nil, nil, nil, nil
+        plan.status = status
         plan.events, plan.committed = {}, true
         s.actionRevision = plan.revision + 1
         return true, plan.action.result
     end
-    -- All validation/preparation is complete before this non-fallible publication.
+    -- The action may have equipped, exhausted or removed a card. Roll only after it succeeds.
+    local board = s.agentAssets and s.agentAssets.byAgent[id]
+    if #plan.requests > 0 and board and #board.placements > 0 then
+        local placements = {}
+        for i, placement in ipairs(board.placements) do
+            local snapshot = {}
+            for key, value in pairs(placement) do snapshot[key] = value end
+            placements[i] = snapshot
+        end
+        plan.status, plan.events = Attack.resolve(plan.stagedStatus, plan.requests, placements, plan.harmRandom)
+        s.agentAssets:applyHarm(id, plan.events, s.agentCards.byAgent[id], s.agentCards.definitions)
+    end
     for key, value in pairs(plan.status) do status[key] = value end
     if status.defeated then
         s.pendingManeuver, s.pendingEndTurn = nil, nil
@@ -95,7 +121,10 @@ function Resolution.commit(plan)
         Engagement.clearTarget(s, id); s.activeAgentId = nil
     end
     if plan.action.endsTurn then s.activeAgentId = nil end
-    if plan.action.endsTurn or status.defeated then require("src.sys.mission_hunt").queueEscape(s) end
+    if plan.action.endsTurn or status.defeated then
+        status.turnTalentBonuses = nil
+        require("src.sys.mission_hunt").queueEscape(s)
+    end
     plan.committed = true
     s.actionRevision = plan.revision + 1
     if #plan.events > 0 then s.attackFeedback = { agentId = id, kind = plan.kind, events = plan.events, defeated = status.defeated == true } end

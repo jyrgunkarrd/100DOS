@@ -19,6 +19,13 @@ function Explore.evaluate(session, agentId, rules)
     local deck = session.locationDecks and session.locationDecks.byCell[cell]
     if not deck then return { valid = false, reason = "No location deck" } end
     if #deck.drawPile == 0 then return { valid = false, reason = "Location deck empty" } end
+    local definitions = session.locationDecks.pool and session.locationDecks.pool.byId or {}
+    for _, card in pairs(deck.inPlay or {}) do
+        local definition = definitions[card.cardId]
+        if definition and definition.blocks_explore then
+            return { valid = false, reason = "Blocked by " .. definition.name }
+        end
+    end
     if status.actionPoints < cost then return { valid = false, reason = "No actions remaining" } end
     return { valid = true, cell = cell, cost = cost, status = status }
 end

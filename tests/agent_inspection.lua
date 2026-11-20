@@ -154,9 +154,16 @@ return function(write)
     local v = mission.inspection.view
     assert(v.instanceDisplay.health == 2)
     status.health = 1
+    local baseFire, baseSteel = v.instanceDisplay.tests[2].value, v.instanceDisplay.tests[1].value
+    status.turnTalentBonuses = { fire = 2, steel = -1 }
     local oldScroll = v.scroll
     render("agent_preview_live.png")
     assert(v.instanceDisplay.health == 1 and v.scroll == oldScroll)
+    local rows = v.instanceLayout.testRows
+    assert(rows[2].value == "+2  " .. (baseFire + 2) and rows[2].valueColor == settings.talentBonusColor)
+    assert(rows[1].value == "-1  " .. (baseSteel - 1) and rows[1].valueColor == settings.talentPenaltyColor)
+    assert(not rows[3].valueColor)
+    status.turnTalentBonuses = nil
     status.exhausted = true
     mission:pointermoved(entry.x + 4, entry.y + 4)
     assert(v.cardId == id and not session.agentView.hovered)

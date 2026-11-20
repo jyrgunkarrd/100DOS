@@ -12,12 +12,15 @@ function Controller:show(source, instance, silent)
             local name = self.agentName and self.agentName(instance.engagedAgentId) or instance.engagedAgentId
             engagementText = (view.settings.engagementLabel or "ENGAGED WITH ") .. name
         end
-        local runtimeHealth
+        local runtimeHealth, runtimeDefiance
         if key == source and source == "location" then
             runtimeHealth = instance.health
             if instance.exhausted then engagementText = "EXHAUSTED" end
         end
-        view:show(key == source and instance.cardId or nil, engagementText, runtimeHealth)
+        if key == source and source == "player_card" then
+            runtimeHealth, runtimeDefiance = instance.health, instance.defiance
+        end
+        view:show(key == source and instance.cardId or nil, engagementText, runtimeHealth, runtimeDefiance)
     end
     if changed and source then
         self.views[source].scroll = 0

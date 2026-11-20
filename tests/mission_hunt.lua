@@ -246,6 +246,38 @@ return function(write)
 
     end
 
+    -- Each attempted secure brings out one hidden Company. Exposed Companies still block.
+    do
+        local game = fixture()
+        local hunt = game.missionHunt
+        local guard, cell = reveal(game, hunt.bodyguardIds[1])
+        local deck = game.locationDecks.byCell[cell]
+        local function relocate(id)
+            local card, fromCell = Hunt.find(game, id)
+            local pile = game.locationDecks.byCell[fromCell].drawPile
+            for i, candidate in ipairs(pile) do
+                if candidate == card then table.remove(pile, i); break end
+            end
+            table.insert(deck.drawPile, card)
+        end
+        local one, two, three = unpack(hunt.companyIds)
+        for _, id in ipairs({ one, two, three, hunt.championInstanceId }) do relocate(id) end
+        reveal(game, three)
+        local function defeat(id, random)
+            deck.inPlay[id].health = 0
+            assert(Elimination.commit(game, cell, id, random or first))
+        end
+        defeat(guard.instanceId, { random = function(_, n) return n end })
+        assert(deck.inPlay[two] and deck.inPlay[two].engagedAgentId == "a" and not deck.inPlay[one])
+        assert(not hunt.secured[cell] and not deck.inPlay[hunt.championInstanceId] and hunt.notice)
+        defeat(two)
+        assert(deck.inPlay[one] and deck.inPlay[three] and not hunt.secured[cell])
+        defeat(three)
+        assert(#deck.inPlayOrder == 1 and deck.inPlayOrder[1] == one and not hunt.secured[cell])
+        defeat(one)
+        assert(hunt.secured[cell] and deck.inPlay[hunt.championInstanceId].engagedAgentId == "a")
+    end
+
     -- Immediate victory suppresses queued retaliation and prevents any later action/refresh.
     s = fixture(); champion, championCell = reveal(s, s.missionHunt.championInstanceId)
     champion.health = 1

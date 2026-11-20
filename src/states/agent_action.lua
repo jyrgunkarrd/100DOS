@@ -14,6 +14,7 @@ local Hand = require("src.ui.agent_hand")
 local Preview = require("src.ui.card_preview")
 local AgentStatus = require("src.sys.agent_status")
 local StatusView = require("src.ui.agent_status")
+local AssetMenu = require("src.ui.asset_ability_menu")
 local Assets = require("src.sys.agent_assets")
 local Play = require("src.sys.card_play")
 local Drag = require("src.ui.card_drag")
@@ -125,7 +126,7 @@ function AgentAction.prepare(source)
     cutin:bind(locationPreview, portrait, id)
     feedback.cutin = cutin
     local testFeedback = require("src.ui.talent_test_feedback").new(cutin, locationPreview, portrait, id, session)
-    local testPanel = require("src.ui.talent_test_panel").new(session, id, source.width, locationPreview, portrait)
+    local testPanel = require("src.ui.talent_test_panel").new(session, id, source.width, locationPreview, portrait, equipment)
     feedback:bindAudio(session, id)
     local previews = PreviewController.new(preview, locationPreview, session.audio, function(agentId) return exploration:agentName(agentId) end)
     for _, diagnostic in ipairs(locationPreview.diagnostics) do print("[Location preview] " .. diagnostic) end
@@ -173,7 +174,15 @@ function AgentAction:resolving()
 end
 
 function AgentAction:combatFeedbackBusy()
-    return self.feedback:busy() or (self.testFeedback and self.testFeedback:busy())
+    return self.feedback:busy() or (self.testFeedback and self.testFeedback:busy()) or self.maneuver.flight ~= nil
+end
+
+function AgentAction:updateManeuver(dt)
+    local impact = self.maneuver:update(dt)
+    if impact then
+        self.session.talentFeedback = impact
+        self.testFeedback:start(impact)
+    end
 end
 
 function AgentAction:update(dt)
@@ -195,6 +204,7 @@ function AgentAction:update(dt)
         elseif self.feedback:update(dt) then
             self.feedback:clear(); self.session.attackFeedback = nil; self.exploration.attackingId = nil
         end
+        self:updateManeuver(dt)
         Backdrop.update(self.session.scene, dt)
         return
     end
@@ -221,13 +231,14 @@ function AgentAction:update(dt)
         self:focus(false, true)
         self.maneuver:start()
     end
-    self.maneuver:update(dt)
+    self:updateManeuver(dt)
     local attack = self.feedback:current()
     if attack then
         self.exploration.attackingId = attack.instanceId
         self.exploration:showInstance(attack.instanceId)
     end
     self.exploration:update(dt)
+    self.testPanel:update(dt)
     local delta = math.max(0, dt)
     self.elapsed, self.portraitAge = self.elapsed + delta, self.portraitAge + delta
     local progress = Animation.easeOutQuad(Animation.progress(self.elapsed, 0, self.settings.slideDuration))
@@ -261,23 +272,29 @@ function AgentAction:syncPreview()
     if not card then
         local index = self.equipment:hit(self.hand.pointerX, self.hand.pointerY)
         local asset = index and self.session.agentAssets:at(self.activeAgentId, index)
-        card = asset and asset.card
+        card = asset
     end
     self.previews:show("player_card", card)
 end
 
 function AgentAction:pointermoved(x, y)
+    if self.assetMenu then return end
     if RoutingUI.pointer(self, x, y) then return end
     local footer = self.session.missionFooter
     if FateInspection.pointermoved(self, x, y) then footer:clearHover(); return end
-    if self.battlefieldInspectionCell then footer:clearHover(); return end
+    if BattlefieldInspection.pointer(self, x, y) then footer:clearHover(); return end
     if Inspection.panelPointer(self, x, y) then return end
+    if self.maneuver.open then
+        footer:clearHover()
+        self.maneuver:pointer(x, y)
+        self.previews:clear()
+        return
+    end
     footer:pointer(self.session, not self.drag.active and x or nil, y)
     if HuntView.busy(self.session) then return end
     self.inspectionX, self.inspectionY = x, y
     self.actions:pointer(x, y)
     if self:resolving() or AgentStatus.isDefeated(self.session.agentStatus, self.activeAgentId) then return end
-    if self.maneuver.open then self.maneuver:pointer(x, y); self.previews:clear(); return end
     if self.elapsed >= self.handReadyAt then
         if not x or not y or x < 0 or y < 0 or x >= self.width or y >= self.height then
             self:focus(false); return
@@ -304,6 +321,7 @@ end
 function AgentAction:focus(focused, preserveActionPanel)
     if not focused then self.session.missionFooter:clearHover(); self.session.missionFooter.routing:cancel() end
     FateInspection.focus(self, focused)
+    if not focused then BattlefieldInspection.pointer(self, nil, nil) end
     if not focused and self.maneuver then self.maneuver.pressed = nil; self.maneuver:pointer(nil, nil) end
     Inspection.focus(self, focused)
     if not focused then self.inspectionX, self.inspectionY = nil, nil end
@@ -313,7 +331,7 @@ function AgentAction:focus(focused, preserveActionPanel)
             self.actions.pressed = nil; self.actions:pointer(nil, nil)
         end
         self.exploration:cancel()
-        self.locationPressed = nil
+        self.locationPressed, self.assetMenu, self.assetPressed = nil, nil, nil
         if self.testPanel then self.testPanel.pressed = nil; self.testPanel:pointermoved(nil, nil) end
         self.done:cancelPress(); self.done:updatePointer(nil, nil)
         self.drag:cancel(); self.hand:clearHover(); self.previews:clear()
@@ -321,6 +339,7 @@ function AgentAction:focus(focused, preserveActionPanel)
 end
 
 function AgentAction:wheelmoved(x, y)
+    if self.assetMenu then return end
     if self.session.missionFooter.routing.receipt or self.session.missionFooter.routing.drag.pending then return end
     if self.session.missionFooter:wheel(y) then return end
     if HuntView.busy(self.session) then return end
@@ -341,6 +360,7 @@ function AgentAction:wheelmoved(x, y)
 end
 
 function AgentAction:mousepressed(x, y, button)
+    if self.assetMenu then self.assetMenu.pressed = self.assetMenu:hit(x, y); return end
     if RoutingUI.press(self, x, y, button) then return end
     if HuntView.busy(self.session) then return end
     if FateInspection.mousepressed(self, x, y, button) then return end
@@ -366,6 +386,11 @@ function AgentAction:mousepressed(x, y, button)
         if card then self.locationPressed = card.instanceId; return end
     end
     if not self.drag.card and self.done:contains(x, y) then self.done:press(x, y, button); return end
+    local slot = self.equipment:hit(x, y)
+    if slot and self:basicActionsEnabled() and not self.actions.open then
+        self.assetPressed = self.session.agentAssets:at(self.activeAgentId, slot)
+        if self.assetPressed then return end
+    end
     local hit = self.hand:hover(x, y)
     -- Gap hover keeps previews continuous; only visible card pixels start a drag.
     if hit and y < hit.y + self.hand.settings.height then self.drag:press(hit.card, x, y) end
@@ -381,6 +406,7 @@ function AgentAction:dragResult()
 end
 
 function AgentAction:mousereleased(x, y, button)
+    if self.assetMenu then self.assetMenu:release(self, x, y, button); return end
     if RoutingUI.releasePointer(self, x, y, button) then return end
     if HuntView.busy(self.session) then return end
     if FateInspection.mousereleased(self, x, y, button) or Inspection.mousereleased(self, x, y, button)
@@ -417,6 +443,15 @@ function AgentAction:mousereleased(x, y, button)
         end
         return
     end
+    if self.assetPressed then
+        local asset = self.assetPressed
+        self.assetPressed = nil
+        local slot = self.equipment:hit(x, y)
+        if self:basicActionsEnabled() and slot and self.session.agentAssets:at(self.activeAgentId, slot) == asset then
+            self.assetMenu = AssetMenu.open(self, asset.card, "play", self.equipment:bounds(asset.start, asset.size))
+        end
+        return
+    end
     if not self.drag.card then
         if self.done:releasePointer(x, y, button) then self:endTurn() end
         return
@@ -435,7 +470,14 @@ function AgentAction:mousereleased(x, y, button)
             end
         end
     end
+    local clicked = not self.drag.active and self.drag.card
     self.drag:cancel()
+    if clicked and self:basicActionsEnabled() and not self.actions.open then
+        local hit = self.hand:hover(x, y)
+        if hit and hit.card == clicked and y < hit.y + self.hand.settings.height then
+            self.assetMenu = AssetMenu.open(self, clicked, "hand", hit.x, hit.y, self.hand.width)
+        end
+    end
     self:pointermoved(x, y)
 end
 
@@ -458,7 +500,8 @@ function AgentAction:performAction(kind, args)
     end
     local success, result, feedback = Resolution.commit(plan)
     if not success then releaseReturn(preparedReturn); return false, result end
-    self.defeatReturn = preparedReturn
+    if plan.status.defeated then self.defeatReturn = preparedReturn
+    else releaseReturn(preparedReturn) end
     if feedback then
         self:focus(false, not plan.status.defeated)
         self.feedback:start(feedback)
@@ -605,6 +648,10 @@ function AgentAction:completeTurn()
 end
 
 function AgentAction:keypressed(key, _, isrepeat)
+    if self.assetMenu then
+        if key == "escape" then self.assetMenu = nil end
+        return
+    end
     if require("src.sys.mission_outcome").finished(self.session) and self:combatFeedbackBusy() then return end
     if RoutingUI.key(self, key) then return end
     if self.session.reinforcementFeedback then return end
@@ -625,9 +672,30 @@ end
 function AgentAction:drawAssets()
     local assets, row, c = self.session.agentAssets, self.equipment, self.drag.settings
     local board = assets.byAgent[self.activeAgentId]
-    local font = self.session.scene.accents.heading
-    for _, asset in ipairs(board.placements) do
-        Footprint.draw(row, asset, self.hand.images[asset.cardId], font, c)
+    local fonts = self.session.scene.accents
+    local event, _, hit = self.feedback:current()
+    local placements = board.placements
+    if event and event.beforeAssets then
+        placements = hit and event.afterAssets or event.beforeAssets
+    end
+    for _, asset in ipairs(placements) do
+        Footprint.draw(row, asset, self.hand.images[asset.cardId], fonts, c)
+    end
+    if hit then
+        for _, loss in ipairs(event.assetHits or {}) do
+            if loss.destroyed then
+                local asset = loss.asset
+                Footprint.draw(row, asset, self.hand.images[asset.cardId], fonts, c)
+                local x, y, w, h = row:bounds(asset.start, asset.size)
+                love.graphics.push("all")
+                love.graphics.setColor(0, 0, 0, 0.55)
+                love.graphics.rectangle("fill", x, y, w, h)
+                love.graphics.setColor(c.invalidColor)
+                love.graphics.line(x, y, x + w, y + h)
+                love.graphics.line(x + w, y, x, y + h)
+                love.graphics.pop()
+            end
+        end
     end
     if not self.drag.active then return end
     local general, target, start = self:dragResult()
@@ -645,7 +713,7 @@ function AgentAction:drawAssets()
         if target.valid then
             local d = self.session.agentCards.definitions.byId[self.drag.card.cardId]
             Footprint.draw(row, { start = start, size = target.size, health = d.health or 0, defiance = d.defiance or 0 },
-                self.hand.images[self.drag.card.cardId], font, c, true)
+                self.hand.images[self.drag.card.cardId], fonts, c, true)
         else
             local x, y, w, h = row:bounds(start, target.size)
             g.setColor(c.invalidColor); g.rectangle("line", x + 0.5, y + 0.5, w - 1, h - 1)
@@ -723,7 +791,8 @@ function AgentAction:draw()
         selectionColor = self.settings.activeAgentColor })
     s.agentView.status = liveStatus
     self.portrait:draw(self.activeAgentId, self.font, s.scene.accents.small, self.portraitAge, { hideLabel = true })
-    self.statusView:draw(self.portrait, self.feedback:status(s.agentStatus.byAgent[self.activeAgentId]))
+    local displayedStatus = self.feedback:status(s.agentStatus.byAgent[self.activeAgentId])
+    self.statusView:draw(self.portrait, displayedStatus, self.testPanel:bonusCost())
     self.exploration:draw(self.elapsed >= self.handReadyAt and not self.drag.card and not self:resolving())
     self:drawDone()
     self.equipment:draw(s.scene.accents.small, self.elapsed)
@@ -735,6 +804,7 @@ function AgentAction:draw()
     s.missionFooter:draw(s)
     self.actions:draw(s, self.activeAgentId, self.exploration:agentName(self.activeAgentId), self:basicActionsEnabled())
     self.previews:draw()
+    FateInspection.drawButton(self)
     BattlefieldInspection.draw(self)
     self:drawDrag()
     self.testPanel:draw(self.hand, s.scene.accents.small, s.scene.accents.heading)
@@ -743,11 +813,16 @@ function AgentAction:draw()
     FateInspection.draw(self)
     if require("src.sys.mission_outcome").finished(s) and not self:combatFeedbackBusy() then
         HuntView.draw(s, self.width, self.height, s.scene.accents.small, s.scene.accents.heading)
-    elseif self.testFeedback:busy() then self.testFeedback:draw(self.width, self.height, s.scene.accents.heading)
+    elseif self.testFeedback:busy() then
+        local feedback = self.testFeedback
+        feedback:draw(self.width, self.height, s.scene.accents.heading)
+        self.statusView:drawFateCost(self.portrait, displayedStatus, feedback.result.reserveCost,
+            feedback.elapsed, feedback.cutin.settings.reducedMotion)
     else self.feedback:draw(self.width, self.height, s.scene.accents.heading) end
     s.missionFooter:drawPreview(s)
     require("src.ui.transport_hover").drawFor(self)
     s.missionFooter.routing:draw(s)
+    if self.assetMenu then self.assetMenu:draw(s.scene.accents.small) end
     if s.scene.phaseFeedbackView then s.scene.phaseFeedbackView:draw(self.width, self.height, s.scene.accents.small) end
     if s.scene.reinforcementView then s.scene.reinforcementView:draw(self.width, self.height, s.scene.accents.small) end
     require("src.ui.doom_clock").drawWarning(s, self.width, self.height)

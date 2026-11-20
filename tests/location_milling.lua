@@ -37,7 +37,7 @@ return function(state, render)
         return r
     end
     local Snapshot = require("src.sys.battlefield_engagement_record")
-    local before = Snapshot.capture(session.armies.byCell[panel.cell], session.armies.catalogue)
+    local before = Snapshot.capture(session.armies, panel.cell)
     local record = Snapshot.complete(before, before, {
         enemy = { damage = 0, absorbed = 0, removed = {} }, allied = { damage = 0, absorbed = 0, removed = {} } })
     record.battlefield, record.battlefieldKind, record.agentId = true, "engage", state.activeAgentId
